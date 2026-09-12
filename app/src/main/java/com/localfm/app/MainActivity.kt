@@ -192,6 +192,8 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
     var webPass by remember { mutableStateOf(FmSettings.webPassword(context)) }
     var hideSizes by remember { mutableStateOf(FmSettings.hideSizes(context)) }
     var showMore by remember { mutableStateOf(false) }
+    var latestTag by remember { mutableStateOf<String?>(null) }
+
     var locked by remember { mutableStateOf(AppLock.hasPin(context)) }
     var filter by remember { mutableStateOf("all") }
     var grid by remember { mutableStateOf(false) }
@@ -570,14 +572,30 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
         )
     }
 
+    LaunchedEffect(showMore) {
+        if (showMore) {
+            latestTag = withContext(Dispatchers.IO) { AppUpdate.latestTag() }
+        }
+    }
     if (showMore) {
         AlertDialog(
             onDismissRequest = { showMore = false },
             title = { Text("Thêm") },
             text = {
                 Column {
-                    Text("Phiên bản v1.2.0")
+                    Text("Phiên bản v${AppUpdate.installed(context)}")
+                    val remote = latestTag
+                    if (!remote.isNullOrBlank()) {
+                        val newer = AppUpdate.isNewer(remote, AppUpdate.installed(context))
+                        Text(if (newer) "Có bản mới: $remote" else "Đang ở bản mới nhất ($remote)",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
                     Text("Thiết bị: ${DeviceInfo.name()}", style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = {
+                        try { AppUpdate.openStore(context) } catch (_: Exception) {
+                            toast(context, "Không mở được trang cập nhật")
+                        }
+                    }) { Text("Cập nhật ứng dụng (GitHub Releases)") }
                     val mail = FmSettings.googleEmail(context)
                     if (mail.isNotBlank()) Text("Google: $mail", style = MaterialTheme.typography.bodySmall)
                     TextButton(onClick = { showLockSetup = true; showMore = false }) { Text("App lock (PIN)") }
