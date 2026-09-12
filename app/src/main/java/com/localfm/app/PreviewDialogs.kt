@@ -9,15 +9,16 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -47,7 +48,9 @@ fun ImagePreviewDialog(file: File, onDismiss: () -> Unit) {
                 inJustDecodeBounds = false
                 BitmapFactory.decodeFile(file.absolutePath, this)
             }
-        } catch (_: Exception) { null }
+        } catch (_: Exception) {
+            null
+        }
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -62,10 +65,7 @@ fun ImagePreviewDialog(file: File, onDismiss: () -> Unit) {
                 )
             } else Text("Không mở được ảnh")
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } },
-        dismissButton = {
-            TextButton(onClick = { pageIndex++ }) { Text("Trang sau") }
-        }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
     )
 }
 
@@ -86,10 +86,7 @@ fun MediaPreviewDialog(file: File, onDismiss: () -> Unit) {
                 onRelease = { it.stopPlayback() }
             )
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } },
-        dismissButton = {
-            TextButton(onClick = { pageIndex++ }) { Text("Trang sau") }
-        }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
     )
 }
 
@@ -110,21 +107,18 @@ fun TextPreviewDialog(file: File, onDismiss: () -> Unit) {
                     .horizontalScroll(rememberScrollState())
             )
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } },
-        dismissButton = {
-            TextButton(onClick = { pageIndex++ }) { Text("Trang sau") }
-        }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
     )
 }
 
 @Composable
 fun PdfPreviewDialog(file: File, onDismiss: () -> Unit) {
-    var pageIndex by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0) }
+    var pageIndex by remember { mutableIntStateOf(0) }
     val page = remember(file.absolutePath, pageIndex) {
         try {
             val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
             val renderer = PdfRenderer(pfd)
-            val idx = pageIndex.coerceIn(0, renderer.pageCount-1)
+            val idx = pageIndex.coerceIn(0, (renderer.pageCount - 1).coerceAtLeast(0))
             val pg = renderer.openPage(idx)
             val bmp = android.graphics.Bitmap.createBitmap(
                 pg.width.coerceAtMost(1080),
@@ -132,14 +126,17 @@ fun PdfPreviewDialog(file: File, onDismiss: () -> Unit) {
                 android.graphics.Bitmap.Config.ARGB_8888
             )
             pg.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-            pg.close(); renderer.close(); pfd.close()
+            pg.close()
+            renderer.close()
+            pfd.close()
             bmp
-        } catch (_: Exception) { null }
+        } catch (_: Exception) {
+            null
+        }
     }
-    DisposableEffect(file.absolutePath) { onDispose { } }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(file.name + " (trang ${pageIndex+1})") },
+        title = { Text("${file.name} (trang ${pageIndex + 1})") },
         text = {
             if (page != null) {
                 Image(

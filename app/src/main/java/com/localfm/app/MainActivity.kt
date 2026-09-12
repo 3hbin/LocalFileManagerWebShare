@@ -1034,6 +1034,7 @@ private fun FileList(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FileRow(
     file: File,
