@@ -18,7 +18,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -118,6 +120,9 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 
 /**
  * Màn hình chính: trình quản lý tệp local + bảng điều khiển Web Share.
@@ -154,7 +159,7 @@ private object ServerHolder {
     var server: LocalWebServer? = null
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
     val context = LocalContext.current
@@ -163,7 +168,7 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
     var currentDir by remember { mutableStateOf(storageRoot) }
     var entries by remember { mutableStateOf(listFilesSafe(currentDir)) }
     var hasAllFilesAccess by remember { mutableStateOf(hasManageStoragePermission()) }
-    var serverRunning by remember { mutableStateOf(ServerHolder.server?.isAlive == true) }
+    var serverRunning by remember { mutableStateOf(ServerBridge.server?.isAlive == true) }
     var localIp by remember { mutableStateOf(NetworkUtils.getLocalWifiIpv4(context)) }
     var showGuide by remember { mutableStateOf(!isFirstLaunchDone(context)) }
 
@@ -186,6 +191,13 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
     var recursive by remember { mutableStateOf(false) }
     var webPass by remember { mutableStateOf(FmSettings.webPassword(context)) }
     var hideSizes by remember { mutableStateOf(FmSettings.hideSizes(context)) }
+    var showMore by remember { mutableStateOf(false) }
+    var locked by remember { mutableStateOf(AppLock.hasPin(context)) }
+    var filter by remember { mutableStateOf("all") }
+    var grid by remember { mutableStateOf(false) }
+    var sortAsc by remember { mutableStateOf(true) }
+    var showTrash by remember { mutableStateOf(false) }
+    var showLockSetup by remember { mutableStateOf(false) }
 
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -199,33 +211,55 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
         hasAllFilesAccess = hasManageStoragePermission()
         localIp = NetworkUtils.getLocalWifiIpv4(context)
         entries = listFilesSafe(currentDir, showHidden)
-        serverRunning = ServerHolder.server?.isAlive == true
-        ServerHolder.server?.shareRoot = currentDir
-        ServerHolder.server?.sharePassword = FmSettings.webPassword(context)
-        ServerHolder.server?.hideSizes = FmSettings.hideSizes(context)
+        serverRunning = ServerBridge.server?.isAlive == true
+        ServerBridge.server?.shareRoot = currentDir
+        ServerBridge.server?.sharePassword = FmSettings.webPassword(context)
+        ServerBridge.server?.hideSizes = FmSettings.hideSizes(context)
     }
 
     LaunchedEffect(currentDir, showHidden) {
         entries = listFilesSafe(currentDir, showHidden)
-        ServerHolder.server?.shareRoot = currentDir
-        ServerHolder.server?.sharePassword = FmSettings.webPassword(context)
-        ServerHolder.server?.hideSizes = FmSettings.hideSizes(context)
+        ServerBridge.server?.shareRoot = currentDir
+        ServerBridge.server?.sharePassword = FmSettings.webPassword(context)
+        ServerBridge.server?.hideSizes = FmSettings.hideSizes(context)
     }
 
-    val visibleFiles = remember(entries, query, sortMode, recursive, currentDir, shortcut) {
+    var deepResults by remember { mutableStateOf<List<File>?>(null) }
+    LaunchedEffect(query, recursive, currentDir, shortcut) {
+        if (!recursive || shortcut != "all" || query.length < 2) {
+            deepResults = null
+            return@LaunchedEffect
+        }
+        delay(280)
+        deepResults = withContext(Dispatchers.IO) { searchRecursive(currentDir, query) }
+    }
+    val visibleFiles = remember(entries, query, sortMode, shortcut, deepResults, recursive) {
         val base = when (shortcut) {
             "fav" -> FmSettings.favorites(context).map { File(it) }.filter { it.exists() }
             "recent" -> FmSettings.recents(context).map { File(it) }.filter { it.exists() }
             else -> entries
         }
-        val searched = if (query.isBlank()) base
-        else if (recursive && shortcut == "all") searchRecursive(currentDir, query)
-        else base.filter { it.name.contains(query, ignoreCase = true) }
-        searched.sortedWith(sortComparator(sortMode))
+        val searched = when {
+            query.isBlank() -> base
+            recursive && shortcut == "all" && query.length >= 2 -> deepResults ?: base.filter { it.name.contains(query, true) }
+            else -> base.filter { it.name.contains(query, ignoreCase = true) }
+        }
+        val typed = searched.filter { f ->
+            when (filter) {
+                "img" -> isImage(f)
+                "vid" -> f.extension.lowercase() in setOf("mp4","mkv","webm","avi","mov")
+                "aud" -> f.extension.lowercase() in setOf("mp3","wav","aac","ogg","m4a","flac")
+                "doc" -> f.extension.lowercase() in setOf("pdf","txt","doc","docx","xls","xlsx")
+                "zip" -> f.extension.lowercase() in setOf("zip","rar","7z")
+                else -> true
+            }
+        }
+        val sorted = typed.sortedWith(sortComparator(sortMode))
+        if (sortAsc) sorted else sorted.reversed()
     }
 
     val shareUrl = remember(localIp, serverRunning) {
-        if (!localIp.isNullOrBlank()) "http://$localIp:${LocalWebServer.DEFAULT_PORT}" else null
+        if (!localIp.isNullOrBlank()) "http://$localIp:${FmSettings.port(context).coerceIn(1024, 65535)}" else null
     }
 
     // Dừng server khi Activity bị huỷ hoàn toàn
@@ -299,6 +333,15 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                     IconButton(onClick = { refresh() }) {
                         Icon(Icons.Outlined.Refresh, contentDescription = "Làm mới")
                     }
+                    IconButton(onClick = { sortAsc = !sortAsc }) {
+                        Icon(Icons.Outlined.Sort, contentDescription = "Tăng/giảm")
+                    }
+                    IconButton(onClick = { grid = !grid }) {
+                        Icon(Icons.Outlined.Image, contentDescription = "Lưới ảnh")
+                    }
+                    IconButton(onClick = { showMore = true }) {
+                        Icon(Icons.Outlined.MoreVert, contentDescription = "Thêm")
+                    }
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Outlined.Settings, contentDescription = "Cài đặt")
                     }
@@ -333,6 +376,11 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
             PathBar(path = currentDir.absolutePath)
             StorageBar(dir = currentDir)
 
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("all" to "Tất cả loại", "img" to "Ảnh", "vid" to "Video", "aud" to "Nhạc", "doc" to "Tài liệu", "zip" to "ZIP").forEach { (k,l) ->
+                    FilterChip(selected = filter==k, onClick = { filter = k }, label = { Text(l, style = MaterialTheme.typography.labelSmall) })
+                }
+            }
             ShortcutRow(
                 current = shortcut,
                 onPick = { shortcut = it },
@@ -383,7 +431,7 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                             toast(context, "Không thể mở cổng 8080. Kiểm tra Wi-Fi hoặc cổng đang bận.")
                         }
                     } else {
-                        stopServer()
+                        stopServer(context)
                         serverRunning = false
                     }
                 }
@@ -397,21 +445,20 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                 )
             }
 
-            SearchRow(query = query, onQuery = { query = it }, count = visibleFiles.size)
-            Row(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Tìm cả cây thư mục", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                Switch(checked = recursive, onCheckedChange = { recursive = it })
-            }
+            SearchRow(
+                query = query,
+                onQuery = { query = it },
+                count = visibleFiles.size,
+                recursive = recursive,
+                onRecursive = { recursive = it }
+            )
             if (selecting || selected.isNotEmpty()) {
                 SelectionBar(
                     count = selected.size,
                     hasClip = ClipHolder.clip != null,
                     onClear = { selected = emptySet(); selecting = false },
                     onDelete = {
-                        selected.map { File(it) }.forEach { deleteRecursivelySafe(it) }
+                        selected.map { File(it) }.forEach { TrashBin.moveToTrash(context, it) }
                         selected = emptySet(); selecting = false
                         entries = listFilesSafe(currentDir, showHidden)
                     },
@@ -505,13 +552,129 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
         )
     }
 
+
+    if (locked) {
+        var pin by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Khoá ứng dụng") },
+            text = {
+                OutlinedTextField(value = pin, onValueChange = { pin = it }, label = { Text("PIN") }, singleLine = true)
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (AppLock.check(context, pin)) locked = false
+                    else toast(context, "Sai PIN")
+                }) { Text("Mở") }
+            }
+        )
+    }
+
+    if (showMore) {
+        AlertDialog(
+            onDismissRequest = { showMore = false },
+            title = { Text("Thêm") },
+            text = {
+                Column {
+                    Text("Phiên bản v1.2.0")
+                    Text("Thiết bị: ${DeviceInfo.name()}", style = MaterialTheme.typography.bodySmall)
+                    val mail = FmSettings.googleEmail(context)
+                    if (mail.isNotBlank()) Text("Google: $mail", style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { showLockSetup = true; showMore = false }) { Text("App lock (PIN)") }
+                    TextButton(onClick = {
+                        toast(context, JunkCleaner.clean(context)); showMore = false
+                    }) { Text("Dọn rác (cache, không phải diệt virus)") }
+                    TextButton(onClick = { showTrash = true; showMore = false }) { Text("Thùng rác") }
+                    TextButton(onClick = {
+                        val dir = BackupKit.backupFolder(context)
+                        toast(context, "Đã lưu ${dir.absolutePath}")
+                        showMore = false
+                    }) { Text("Sao lưu cấu hình + tên thiết bị") }
+                    TextButton(onClick = {
+                        try {
+                            context.startActivity(Intent.createChooser(
+                                android.accounts.AccountManager.newChooseAccountIntent(
+                                    null, null, arrayOf("com.google"), null, null, null, null
+                                ), "Tài khoản Google"
+                            ))
+                        } catch (_: Exception) {
+                            toast(context, "Không mở được tài khoản Google")
+                        }
+                    }) { Text("Đăng nhập Google") }
+                    TextButton(onClick = {
+                        val f = File(currentDir, "ghi_chu_${System.currentTimeMillis()}.txt")
+                        f.writeText("")
+                        entries = listFilesSafe(currentDir, showHidden)
+                        showMore = false
+                    }) { Text("Tạo tệp TXT") }
+                    TextButton(onClick = {
+                        val one = selected.map { File(it) }.firstOrNull()
+                        if (one==null || one.isDirectory) toast(context, "Chọn 1 tệp để đổi đuôi")
+                        else {
+                            val neu = File(one.parentFile, one.nameWithoutExtension + ".bak")
+                            if (one.renameTo(neu)) toast(context, "Đã đổi thành ${neu.name}")
+                        }
+                    }) { Text("Đổi phần mở rộng thành .bak") }
+                    TextButton(onClick = {
+                        showQr = true; showMore = false
+                    }) { Text("Lưu / xem QR Web Share") }
+                    TextButton(onClick = {
+                        val two = selected.map { File(it) }.take(2)
+                        if (two.size < 2) toast(context, "Chọn đúng 2 tệp để so sánh")
+                        else {
+                            val a = two[0]; val b = two[1]
+                            toast(context, "${a.name} ${a.length()}B vs ${b.name} ${b.length()}B")
+                        }
+                    }) { Text("So sánh 2 tệp đã chọn") }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showMore = false }) { Text("Đóng") } }
+        )
+    }
+
+    if (showLockSetup) {
+        var p1 by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showLockSetup = false },
+            title = { Text("Đặt PIN") },
+            text = { OutlinedTextField(value = p1, onValueChange = { p1 = it }, label = { Text("PIN mới") }) },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (p1.length >= 4) { AppLock.setPin(context, p1); showLockSetup = false; toast(context, "Đã khoá app") }
+                }) { Text("Lưu") }
+            },
+            dismissButton = { TextButton(onClick = { AppLock.clear(context); showLockSetup = false }) { Text("Tắt khoá") } }
+        )
+    }
+
+    if (showTrash) {
+        val items = TrashBin.list(context)
+        AlertDialog(
+            onDismissRequest = { showTrash = false },
+            title = { Text("Thùng rác") },
+            text = {
+                Column {
+                    if (items.isEmpty()) Text("Trống")
+                    items.take(12).forEach { f ->
+                        Text(f.name, modifier = Modifier.clickable {
+                            TrashBin.restore(context, f, currentDir)
+                            entries = listFilesSafe(currentDir, showHidden)
+                        })
+                    }
+                    Text("Chạm tên để khôi phục về thư mục hiện tại", style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = { TextButton(onClick = { showTrash = false }) { Text("Đóng") } }
+        )
+    }
+
     pendingDelete?.let { target ->
         ConfirmDeleteDialog(
             file = target,
             onDismiss = { pendingDelete = null },
             onConfirm = {
-                val ok = deleteRecursivelySafe(target)
-                toast(context, if (ok) "Đã xoá ${target.name}" else "Không xoá được")
+                val ok = TrashBin.moveToTrash(context, target)
+                toast(context, if (ok) "Đã đưa vào thùng rác ${target.name}" else "Không xoá được")
                 pendingDelete = null
                 entries = listFilesSafe(currentDir, showHidden)
             }
@@ -573,12 +736,12 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
             onPassword = {
                 webPass = it
                 FmSettings.setWebPassword(context, it)
-                ServerHolder.server?.sharePassword = it
+                ServerBridge.server?.sharePassword = it
             },
             onHideSizes = {
                 hideSizes = it
                 FmSettings.setHideSizes(context, it)
-                ServerHolder.server?.hideSizes = it
+                ServerBridge.server?.hideSizes = it
             },
             onDismiss = { showSettings = false }
         )
@@ -598,24 +761,41 @@ private fun StorageBar(dir: File) {
 }
 
 @Composable
-private fun SearchRow(query: String, onQuery: (String) -> Unit, count: Int) {
+private fun SearchRow(
+    query: String,
+    onQuery: (String) -> Unit,
+    count: Int,
+    recursive: Boolean,
+    onRecursive: (Boolean) -> Unit
+) {
     OutlinedTextField(
         value = query,
         onValueChange = onQuery,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
         singleLine = true,
-        label = { Text("Tìm trong thư mục") },
+        placeholder = { Text(if (recursive) "Tìm cả máy…" else "Tìm thư mục này") },
         leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
         trailingIcon = {
-            Text(
-                text = "$count",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "$count",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 4.dp)
+                )
+                IconButton(onClick = { onRecursive(!recursive) }) {
+                    Icon(
+                        imageVector = if (recursive) Icons.Outlined.Visibility else Icons.Outlined.Search,
+                        contentDescription = "Tìm cả cây",
+                        tint = if (recursive) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         },
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(14.dp)
     )
 }
 
@@ -644,7 +824,20 @@ private fun QrShareDialog(url: String, onDismiss: () -> Unit) {
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } },
+        dismissButton = {
+            val ctx = LocalContext.current
+            TextButton(onClick = {
+                try {
+                    val bmp = QrCodeUtils.makeBitmap(url) ?: return@TextButton
+                    val dir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
+                    dir.mkdirs()
+                    val f = java.io.File(dir, "webshare_qr.png")
+                    java.io.FileOutputStream(f).use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                    toast(ctx, "Đã lưu ${f.absolutePath}")
+                } catch (_: Exception) { toast(ctx, "Không lưu được QR") }
+            }) { Text("Lưu ảnh QR") }
+        }
     )
 }
 
@@ -672,19 +865,20 @@ private fun ServerControlPanel(
     onCopyUrl: () -> Unit,
     onShowQr: () -> Unit
 ) {
-    val url = if (!ip.isNullOrBlank()) "http://$ip:${LocalWebServer.DEFAULT_PORT}" else null
+    val ctx = LocalContext.current
+    val url = if (!ip.isNullOrBlank()) "http://$ip:${FmSettings.port(ctx).coerceIn(1024, 65535)}" else null
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = if (running) Icons.Outlined.Wifi else Icons.Outlined.WifiOff,
@@ -861,17 +1055,32 @@ private fun FileRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onOpen)
-            .padding(horizontal = 8.dp, vertical = 10.dp),
+            .combinedClickable(onClick = onOpen, onLongClick = onToggleSelect)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Checkbox(checked = selected, onCheckedChange = { onToggleSelect() })
+        if (selecting) {
+            Checkbox(checked = selected, onCheckedChange = { onToggleSelect() })
+        }
+        val thumb = remember(file.absolutePath) {
+            when {
+                isImage(file) -> ThumbCache.image(file)
+                file.extension.lowercase() in setOf("mp4","mkv","webm","3gp") -> ThumbCache.video(file)
+                else -> null
+            }
+        }
+        if (thumb != null) {
+            Image(bitmap = thumb.asImageBitmap(), contentDescription = file.name,
+                modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)),
+                contentScale = ContentScale.Crop)
+        } else {
         Icon(
             imageVector = iconFor(file),
             contentDescription = if (file.isDirectory) "Thư mục" else "Tệp",
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(28.dp)
         )
+        }
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -1090,8 +1299,9 @@ private fun FileDetailsDialog(file: File, onDismiss: () -> Unit) {
                 DetailLine("Đường dẫn", file.absolutePath)
                 DetailLine(
                     "Kích thước",
-                    if (file.isDirectory) "—" else formatSize(file.length())
+                    if (file.isDirectory) formatSize(FolderSize.of(file)) else formatSize(file.length())
                 )
+                DetailLine("Thiết bị", DeviceInfo.name())
                 DetailLine("Sửa đổi", DATE_FMT.format(Date(file.lastModified())))
             }
         },
@@ -1123,7 +1333,7 @@ private fun ShortcutRow(
             .padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        FilterChip(selected = current == "all", onClick = { onPick("all") }, label = { Text("Tất cả") })
+        FilterChip(selected = current == "all", onClick = { onPick("all") }, label = { Text("Tất cả", style = MaterialTheme.typography.labelMedium) })
         FilterChip(selected = false, onClick = onPictures, label = { Text("Ảnh") })
         FilterChip(selected = false, onClick = onDownload, label = { Text("Tải xuống") })
         FilterChip(selected = false, onClick = onDocs, label = { Text("Tài liệu") })
@@ -1192,6 +1402,26 @@ private fun SettingsDialog(
                     label = { Text("Mật khẩu Web Share (trống = không)") },
                     singleLine = true
                 )
+                val ctx = LocalContext.current
+                var portTxt by rememberSaveable { mutableStateOf(FmSettings.port(ctx).toString()) }
+                OutlinedTextField(value = portTxt, onValueChange = {
+                    portTxt = it
+                    it.toIntOrNull()?.let { n -> if (n in 1024..65535) FmSettings.setPort(ctx, n) }
+                }, label = { Text("Cổng Web Share") }, singleLine = true)
+                Text("Tự tắt server")
+                Row {
+                    listOf(0,15,30,60).forEach { m ->
+                        TextButton(onClick = { FmSettings.setAutoOffMin(ctx, m) }) { Text(if (m==0) "Không" else "${m}p") }
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Chỉ nhận tệp (web)", modifier = Modifier.weight(1f))
+                    Switch(checked = FmSettings.receiveOnly(ctx), onCheckedChange = { FmSettings.setReceiveOnly(ctx, it) })
+                }
+                var mail by rememberSaveable { mutableStateOf(FmSettings.googleEmail(ctx)) }
+                OutlinedTextField(value = mail, onValueChange = { mail = it; FmSettings.setGoogleEmail(ctx, it) },
+                    label = { Text("Email Google / tên khôi phục") }, singleLine = true)
+
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Xong") } }
@@ -1306,27 +1536,19 @@ private fun copyToClipboard(context: Context, text: String) {
 }
 
 private fun startServer(context: Context, root: File): Boolean {
-    stopServer()
     return try {
-        val server = LocalWebServer(LocalWebServer.DEFAULT_PORT, root)
-        server.sharePassword = FmSettings.webPassword(context)
-        server.hideSizes = FmSettings.hideSizes(context)
-        server.start()
-        ServerHolder.server = server
+        WebShareService.start(context, root, FmSettings.port(context).coerceIn(1024, 65535))
         true
-    } catch (t: Throwable) {
-        ServerHolder.server = null
-        false
-    }
+    } catch (_: Exception) { false }
 }
 
-private fun stopServer() {
+private fun stopServer(context: Context? = null) {
     try {
-        ServerHolder.server?.stop()
+        if (context != null) WebShareService.stop(context)
+        else ServerBridge.server?.stop()
     } catch (_: Exception) {
-        // bỏ qua
     } finally {
-        ServerHolder.server = null
+        if (context == null) ServerBridge.server = null
     }
 }
 

@@ -62,7 +62,10 @@ fun ImagePreviewDialog(file: File, onDismiss: () -> Unit) {
                 )
             } else Text("Không mở được ảnh")
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } },
+        dismissButton = {
+            TextButton(onClick = { pageIndex++ }) { Text("Trang sau") }
+        }
     )
 }
 
@@ -83,7 +86,10 @@ fun MediaPreviewDialog(file: File, onDismiss: () -> Unit) {
                 onRelease = { it.stopPlayback() }
             )
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } },
+        dismissButton = {
+            TextButton(onClick = { pageIndex++ }) { Text("Trang sau") }
+        }
     )
 }
 
@@ -104,17 +110,22 @@ fun TextPreviewDialog(file: File, onDismiss: () -> Unit) {
                     .horizontalScroll(rememberScrollState())
             )
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } },
+        dismissButton = {
+            TextButton(onClick = { pageIndex++ }) { Text("Trang sau") }
+        }
     )
 }
 
 @Composable
 fun PdfPreviewDialog(file: File, onDismiss: () -> Unit) {
-    val page = remember(file.absolutePath) {
+    var pageIndex by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0) }
+    val page = remember(file.absolutePath, pageIndex) {
         try {
             val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
             val renderer = PdfRenderer(pfd)
-            val pg = renderer.openPage(0)
+            val idx = pageIndex.coerceIn(0, renderer.pageCount-1)
+            val pg = renderer.openPage(idx)
             val bmp = android.graphics.Bitmap.createBitmap(
                 pg.width.coerceAtMost(1080),
                 pg.height.coerceAtMost(1600),
@@ -128,7 +139,7 @@ fun PdfPreviewDialog(file: File, onDismiss: () -> Unit) {
     DisposableEffect(file.absolutePath) { onDispose { } }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(file.name + " (trang 1)") },
+        title = { Text(file.name + " (trang ${pageIndex+1})") },
         text = {
             if (page != null) {
                 Image(
@@ -139,6 +150,9 @@ fun PdfPreviewDialog(file: File, onDismiss: () -> Unit) {
                 )
             } else Text("Không mở được PDF")
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } },
+        dismissButton = {
+            TextButton(onClick = { pageIndex++ }) { Text("Trang sau") }
+        }
     )
 }

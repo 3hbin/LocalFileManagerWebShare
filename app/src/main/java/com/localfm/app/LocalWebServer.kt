@@ -22,6 +22,7 @@ class LocalWebServer(
 
     @Volatile var sharePassword: String = ""
     @Volatile var hideSizes: Boolean = false
+    @Volatile var receiveOnly: Boolean = false
 
     companion object {
         const val DEFAULT_PORT = 8080
@@ -153,6 +154,23 @@ class LocalWebServer(
         val children = current.listFiles()?.toList().orEmpty()
             .sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase(Locale.US) })
         val parentRel = current.parentFile?.takeIf { isInsideRoot(it) }?.let { relativePath(it) }
+        if (receiveOnly) {
+            val html = htmlHead("Nhận tệp") + """
+            <body><div class="wrap"><header><div class="brand">Chỉ nhận tệp</div>
+            <div class="sub">${escape(current.absolutePath)}</div></header>
+            <section class="card upload drop" id="drop">
+            <h2>Tải tệp lên điện thoại</h2>
+            <form id="up" action="/upload" method="post" enctype="multipart/form-data">
+            <input type="hidden" name="dir" value="${escape(relCurrent)}" />
+            <input type="file" name="file" id="file" required />
+            <button type="submit">Tải lên</button></form></section>
+            <script>
+            const d=document.getElementById('drop');const f=document.getElementById('file');
+            ['dragenter','dragover'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();}));
+            d.addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer.files.length){f.files=e.dataTransfer.files;document.getElementById('up').submit();}});
+            </script></div></body></html>"""
+            return newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8", html)
+        }
         val html = buildString {
             append(htmlHead("Quản lý tệp"))
             append("""<body><div class="wrap">""")

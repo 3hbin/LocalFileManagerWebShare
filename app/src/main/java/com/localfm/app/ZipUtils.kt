@@ -66,4 +66,18 @@ object ZipUtils {
             e.message ?: "Giải nén thất bại"
         }
     }
+
+    fun zipPassword(sources: List<File>, destZip: File, password: String): Boolean {
+        return try {
+            val zp = net.lingala.zip4j.ZipFile(destZip, password.toCharArray())
+            val params = net.lingala.zip4j.model.ZipParameters().apply {
+                isEncryptFiles = true
+                encryptionMethod = net.lingala.zip4j.model.enums.EncryptionMethod.AES
+            }
+            sources.forEach { f ->
+                if (f.isDirectory) zp.addFolder(f, params) else zp.addFile(f, params)
+            }
+            destZip.exists()
+        } catch (_: Exception) { false }
+    }
 }

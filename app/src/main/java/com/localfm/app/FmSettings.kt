@@ -59,6 +59,16 @@ object FmSettings {
         saveList(ctx, "recents", list.take(30))
     }
 
+
+    fun port(ctx: Context) = ctx.getSharedPreferences(P, 0).getInt("port", 8080)
+    fun setPort(ctx: Context, v: Int) { ctx.getSharedPreferences(P, 0).edit().putInt("port", v).apply() }
+    fun autoOffMin(ctx: Context) = ctx.getSharedPreferences(P, 0).getInt("auto_off", 0)
+    fun setAutoOffMin(ctx: Context, v: Int) { ctx.getSharedPreferences(P, 0).edit().putInt("auto_off", v).apply() }
+    fun receiveOnly(ctx: Context) = ctx.getSharedPreferences(P, 0).getBoolean("recv_only", false)
+    fun setReceiveOnly(ctx: Context, on: Boolean) { ctx.getSharedPreferences(P, 0).edit().putBoolean("recv_only", on).apply() }
+    fun googleEmail(ctx: Context) = ctx.getSharedPreferences(P, 0).getString("g_email", "") ?: ""
+    fun setGoogleEmail(ctx: Context, e: String) { ctx.getSharedPreferences(P, 0).edit().putString("g_email", e).apply() }
+
     private fun saveList(ctx: Context, key: String, list: List<String>) {
         val arr = JSONArray()
         list.forEach { arr.put(it) }
