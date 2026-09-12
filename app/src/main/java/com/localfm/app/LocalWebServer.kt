@@ -8,26 +8,20 @@ import java.io.FileOutputStream
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
-/**
- * Máy chủ HTTP nhúng (NanoHTTPD) chạy trên cổng 8080.
- *
- * Hỗ trợ:
- *  - GET  /            : giao diện HTML liệt kê thư mục đang chia sẻ
- *  - GET  /browse?p=   : duyệt thư mục con (không thoát khỏi root)
- *  - GET  /download?p= : tải tệp về máy tính
- *  - POST /upload      : tải tệp từ máy tính lên Android (multipart)
- *
- * Mọi đường dẫn đều được chuẩn hoá và kiểm tra nằm trong [shareRoot]
- * để tránh path traversal.
- */
 class LocalWebServer(
     port: Int = DEFAULT_PORT,
     @Volatile var shareRoot: File
 ) : NanoHTTPD(port) {
+
+    @Volatile var sharePassword: String = ""
+    @Volatile var hideSizes: Boolean = false
 
     companion object {
         const val DEFAULT_PORT = 8080
@@ -36,173 +30,207 @@ class LocalWebServer(
 
     override fun serve(session: IHTTPSession): Response {
         return try {
+            val uri = session.uri ?: "/"
+            if (uri == "/style.css") return cssResponse()
+            if (!authorized(session)) {
+                return if (session.method == Method.POST && uri == "/login") handleLogin(session)
+                else loginPage()
+            }
             when (session.method) {
                 Method.POST -> handlePost(session)
                 Method.GET, Method.HEAD -> handleGet(session)
                 Method.OPTIONS -> newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, "")
-                else -> newFixedLengthResponse(
-                    Response.Status.METHOD_NOT_ALLOWED,
-                    MIME_PLAINTEXT,
-                    "Method not allowed"
-                )
+                else -> newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, MIME_PLAINTEXT, "Không hỗ trợ")
             }
         } catch (t: Throwable) {
-            newFixedLengthResponse(
-                Response.Status.INTERNAL_ERROR,
-                MIME_PLAINTEXT,
-                "Server error: ${t.message ?: t.javaClass.simpleName}"
-            )
+            newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Lỗi server: ${t.message}")
         }
+    }
+
+    private fun token(): String {
+        if (sharePassword.isBlank()) return ""
+        val md = MessageDigest.getInstance("SHA-256")
+        return md.digest(sharePassword.toByteArray()).joinToString("") { "%02x".format(it) }.take(20)
+    }
+
+    private fun authorized(session: IHTTPSession): Boolean {
+        if (sharePassword.isBlank()) return true
+        val cookie = session.headers["cookie"].orEmpty()
+        return cookie.contains("lfm=${token()}")
+    }
+
+    private fun loginPage(): Response {
+        val html = htmlHead("Đăng nhập") + """
+            <body><div class="wrap"><section class="card">
+            <h2>Web Share có mật khẩu</h2>
+            <form action="/login" method="post">
+              <input type="password" name="password" placeholder="Mật khẩu" required />
+              <button type="submit">Vào</button>
+            </form></section></div></body></html>
+        """.trimIndent()
+        return newFixedLengthResponse(Response.Status.UNAUTHORIZED, "text/html; charset=utf-8", html)
+    }
+
+    private fun handleLogin(session: IHTTPSession): Response {
+        val files = HashMap<String, String>()
+        session.parseBody(files)
+        val pass = session.parms["password"].orEmpty()
+        if (pass != sharePassword) return loginPage()
+        val res = htmlRedirect("/", "Đăng nhập thành công")
+        res.addHeader("Set-Cookie", "lfm=${token()}; Path=/; HttpOnly")
+        return res
     }
 
     private fun handleGet(session: IHTTPSession): Response {
         val uri = session.uri ?: "/"
         val params = session.parms ?: emptyMap()
-
         return when {
-            uri == "/" || uri == "/browse" || uri.startsWith("/browse") -> {
-                serveListing(params["p"].orEmpty())
-            }
+            uri == "/" || uri == "/browse" || uri.startsWith("/browse") -> serveListing(params["p"].orEmpty())
             uri == "/download" -> serveDownload(params["p"].orEmpty())
-            uri == "/style.css" -> cssResponse()
-            else -> newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found")
+            uri == "/zip" -> serveZip(params["p"].orEmpty())
+            else -> newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Không tìm thấy")
         }
     }
 
     private fun handlePost(session: IHTTPSession): Response {
         val uri = session.uri ?: "/"
-        if (uri != "/upload") {
-            return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found")
-        }
-
         val files = HashMap<String, String>()
         session.parseBody(files)
-
         val params = session.parms ?: emptyMap()
+        return when (uri) {
+            "/upload" -> handleUpload(files, params)
+            "/zip-selected" -> handleZipSelected(params)
+            else -> newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Không tìm thấy")
+        }
+    }
+
+    private fun handleUpload(files: Map<String, String>, params: Map<String, String>): Response {
         val relDir = params["dir"].orEmpty()
         val destDir = resolveSafe(relDir) ?: shareRoot
         if (!destDir.exists()) destDir.mkdirs()
-        if (!destDir.isDirectory) {
-            return htmlRedirect("/", "Thu muc dich khong hop le.")
-        }
-
+        if (!destDir.isDirectory) return htmlRedirect("/", "Thư mục đích không hợp lệ.")
         val tmpPath = files["file"]
         val originalName = sanitizeFileName(params["file"] ?: "upload.bin")
-
-        if (tmpPath.isNullOrBlank()) {
-            return htmlRedirect(browseLink(relDir), "Khong nhan duoc tep tai len.")
-        }
-
+        if (tmpPath.isNullOrBlank()) return htmlRedirect(browseLink(relDir), "Không nhận được tệp tải lên.")
         val tmp = File(tmpPath)
-        if (!tmp.exists()) {
-            return htmlRedirect(browseLink(relDir), "Tep tam khong ton tai.")
-        }
-
+        if (!tmp.exists()) return htmlRedirect(browseLink(relDir), "Tệp tạm không tồn tại.")
         val target = uniqueFile(File(destDir, originalName))
-        FileInputStream(tmp).use { input ->
-            FileOutputStream(target).use { output ->
-                input.copyTo(output)
-            }
-        }
+        FileInputStream(tmp).use { input -> FileOutputStream(target).use { input.copyTo(it) } }
         tmp.delete()
+        return htmlRedirect(browseLink(relDir), "Đã tải lên: ${target.name}")
+    }
 
-        return htmlRedirect(browseLink(relDir), "Da tai len: ${target.name}")
+    private fun handleZipSelected(params: Map<String, String>): Response {
+        val raw = params["paths"].orEmpty()
+        val rels = raw.split('\n', ',', ';').map { it.trim() }.filter { it.isNotBlank() }
+        val srcs = rels.mapNotNull { resolveSafe(it) }.filter { it.exists() }
+        if (srcs.isEmpty()) return htmlRedirect("/", "Chưa chọn tệp")
+        val tmp = File.createTempFile("share-", ".zip")
+        val ok = ZipUtils.zipTo(srcs, tmp)
+        if (!ok) return htmlRedirect("/", "Không nén được")
+        val fis = FileInputStream(tmp)
+        val res = newFixedLengthResponse(Response.Status.OK, "application/zip", fis, tmp.length())
+        res.addHeader("Content-Disposition", "attachment; filename=\"selected.zip\"")
+        return res
+    }
+
+    private fun serveZip(rel: String): Response {
+        val file = resolveSafe(rel) ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Không tìm thấy")
+        val tmp = File.createTempFile("folder-", ".zip")
+        if (!ZipUtils.zipTo(listOf(file), tmp)) {
+            return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Không nén được")
+        }
+        val fis = FileInputStream(tmp)
+        val res = newFixedLengthResponse(Response.Status.OK, "application/zip", fis, tmp.length())
+        res.addHeader("Content-Disposition", "attachment; filename=\"${encodeHeaderFileName(file.name)}.zip\"")
+        return res
     }
 
     private fun serveListing(rel: String): Response {
         val dir = resolveSafe(rel) ?: shareRoot
         val current = if (dir.isDirectory) dir else dir.parentFile ?: shareRoot
         val relCurrent = relativePath(current)
-
         val children = current.listFiles()?.toList().orEmpty()
             .sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase(Locale.US) })
-
-        val parentRel = current.parentFile
-            ?.takeIf { isInsideRoot(it) }
-            ?.let { relativePath(it) }
-
+        val parentRel = current.parentFile?.takeIf { isInsideRoot(it) }?.let { relativePath(it) }
         val html = buildString {
-            append(htmlHead("Local File Manager"))
+            append(htmlHead("Quản lý tệp"))
             append("""<body><div class="wrap">""")
-            append("""<header><div class="brand">Local File Manager</div>""")
-            append("""<div class="sub">Sharing: ${escape(current.absolutePath)}</div></header>""")
-
+            append("""<header><div class="brand">Quản lý tệp</div>""")
+            append("""<div class="sub">Đang chia sẻ: ${escape(current.absolutePath)}</div></header>""")
             append("""<nav class="crumb">""")
-            append("""<a href="/">Root</a>""")
+            append("""<a href="/">Gốc</a>""")
             if (relCurrent.isNotBlank()) {
-                val parts = relCurrent.split('/').filter { it.isNotBlank() }
                 var acc = ""
-                for (part in parts) {
-                    acc = if (acc.isEmpty()) part else "$acc/$part"
+                relCurrent.split('/').filter { it.isNotBlank() }.forEach { part ->
+                    acc = if (acc.isBlank()) part else "$acc/$part"
                     append("""<span class="sep">/</span><a href="${browseLink(acc)}">${escape(part)}</a>""")
                 }
             }
             append("</nav>")
-
-            append("""<section class="card upload">""")
-            append("""<h2>Upload file to Android</h2>""")
-            append("""<form action="/upload" method="post" enctype="multipart/form-data">""")
+            append("""<section class="card upload drop" id="drop">""")
+            append("""<h2>Tải tệp lên điện thoại — kéo thả vào đây</h2>""")
+            append("""<form id="up" action="/upload" method="post" enctype="multipart/form-data">""")
             append("""<input type="hidden" name="dir" value="${escape(relCurrent)}" />""")
-            append("""<input type="file" name="file" required />""")
-            append("""<button type="submit">Upload</button>""")
-            append("</form></section>")
-
-            append("""<section class="card"><table>""")
-            append("<thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Modified</th><th></th></tr></thead><tbody>")
-
+            append("""<input type="file" name="file" id="file" multiple required />""")
+            append("""<button type="submit">Tải lên</button></form></section>""")
+            append("""<form action="/zip-selected" method="post"><section class="card"><table>""")
+            append("<thead><tr><th></th><th>Tên</th><th>Loại</th>")
+            if (!hideSizes) append("<th>Kích thước</th>")
+            append("<th>Sửa đổi</th><th></th></tr></thead><tbody>")
             if (parentRel != null || relCurrent.isNotBlank()) {
                 val href = if (parentRel == null) "/" else browseLink(parentRel)
-                append("""<tr class="dir"><td colspan="5"><a href="$href">.. (Parent folder)</a></td></tr>""")
+                append("""<tr class="dir"><td></td><td colspan="5"><a href="$href">.. (Thư mục cha)</a></td></tr>""")
             }
-
-            if (children.isEmpty()) {
-                append("""<tr><td colspan="5" class="empty">Empty folder</td></tr>""")
-            }
-
+            if (children.isEmpty()) append("""<tr><td colspan="6" class="empty">Thư mục trống</td></tr>""")
             for (file in children) {
                 val name = file.name
                 val relChild = relativePath(file)
-                val type = if (file.isDirectory) "Folder" else (file.extension.ifBlank { "File" }.uppercase(Locale.US))
-                val size = if (file.isDirectory) "-" else formatSize(file.length())
+                val type = if (file.isDirectory) "Thư mục" else file.extension.ifBlank { "Tệp" }.uppercase(Locale.US)
+                val size = if (hideSizes) "" else if (file.isDirectory) "-" else formatSize(file.length())
                 val modified = DATE_FMT.format(Date(file.lastModified()))
                 append("<tr>")
+                append("""<td><input type="checkbox" name="paths" value="${escape(relChild)}"/></td>""")
                 if (file.isDirectory) {
                     append("""<td><a class="name dir" href="${browseLink(relChild)}">${escape(name)}</a></td>""")
-                    append("<td>$type</td><td>$size</td><td>$modified</td><td></td>")
+                    append("<td>$type</td>")
+                    if (!hideSizes) append("<td>$size</td>")
+                    append("<td>$modified</td>")
+                    append("""<td><a class="dl" href="/zip?p=${urlEncode(relChild)}">Tải thư mục</a></td>""")
                 } else {
                     append("""<td><span class="name">${escape(name)}</span></td>""")
-                    append("<td>$type</td><td>$size</td><td>$modified</td>")
-                    append("""<td><a class="dl" href="${downloadLink(relChild)}">Download</a></td>""")
+                    append("<td>$type</td>")
+                    if (!hideSizes) append("<td>$size</td>")
+                    append("<td>$modified</td>")
+                    append("""<td><a class="dl" href="${downloadLink(relChild)}">Tải xuống</a></td>""")
                 }
                 append("</tr>")
             }
-
-            append("</tbody></table></section>")
-            append("""<footer>NanoHTTPD · Port ${DEFAULT_PORT} · Same Wi-Fi only</footer>""")
-            append("</div></body></html>")
+            append("</tbody></table>")
+            append("""<p><button type="submit">Tải các mục đã chọn (ZIP)</button></p>""")
+            append("</section></form>")
+            append("""<script>
+const d=document.getElementById('drop');
+const f=document.getElementById('file');
+['dragenter','dragover'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();d.classList.add('on');}));
+['dragleave','drop'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();d.classList.remove('on');}));
+d.addEventListener('drop',e=>{if(e.dataTransfer.files.length){f.files=e.dataTransfer.files;document.getElementById('up').submit();}});
+</script></div></body></html>""")
         }
-
         return newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8", html)
     }
 
     private fun serveDownload(rel: String): Response {
-        val file = resolveSafe(rel)
-        if (file == null || !file.exists() || !file.isFile) {
-            return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "File not found")
-        }
-        val mime = guessMime(file)
+        val file = resolveSafe(rel) ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Không tìm thấy")
+        if (!file.isFile) return serveZip(rel)
         val fis = FileInputStream(file)
-        val response = newFixedLengthResponse(Response.Status.OK, mime, fis, file.length())
-        response.addHeader(
-            "Content-Disposition",
-            "attachment; filename=\"${encodeHeaderFileName(file.name)}\"; filename*=UTF-8''${urlEncode(file.name)}"
-        )
-        return response
+        val res = newFixedLengthResponse(Response.Status.OK, guessMime(file), fis, file.length())
+        res.addHeader("Content-Disposition", "attachment; filename=\"${encodeHeaderFileName(file.name)}\"; filename*=UTF-8''${urlEncode(file.name)}")
+        return res
     }
 
-    private fun cssResponse(): Response {
-        return newFixedLengthResponse(Response.Status.OK, "text/css; charset=utf-8", WEB_CSS)
-    }
+    private fun cssResponse(): Response =
+        newFixedLengthResponse(Response.Status.OK, "text/css; charset=utf-8", WEB_CSS)
 
     private fun resolveSafe(rel: String): File? {
         val decoded = try {
@@ -242,7 +270,7 @@ class LocalWebServer(
             <meta charset="utf-8"/>
             <meta http-equiv="refresh" content="1;url=$location"/>
             <link rel="stylesheet" href="/style.css"/>
-            <title>Local File Manager</title></head>
+            <title>Quản lý tệp</title></head>
             <body><div class="wrap"><section class="card"><p>${escape(message)}</p>
             <p><a href="$location">Back to list</a></p></section></div></body></html>
         """.trimIndent()
@@ -368,6 +396,7 @@ td { padding: 10px 6px; border-bottom: 1px solid var(--line); }
 .name { font-weight: 550; }
 a.name.dir { color: var(--brand); text-decoration: none; }
 .empty { color: var(--muted); text-align: center; padding: 24px 0; }
+.drop.on { outline: 2px dashed var(--brand); background: #e8f0ff; }
 footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8px; }
 @media (max-width: 640px) {
   th:nth-child(3), td:nth-child(3), th:nth-child(4), td:nth-child(4) { display: none; }

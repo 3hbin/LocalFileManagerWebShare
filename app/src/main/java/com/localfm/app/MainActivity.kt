@@ -62,6 +62,18 @@ import androidx.compose.material.icons.outlined.SdStorage
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material.icons.outlined.WifiOff
+import androidx.compose.material3.Checkbox
+import androidx.compose.material.icons.outlined.ContentCut
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Unarchive
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -118,9 +130,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            LocalFileManagerTheme {
+            val dark = remember { mutableStateOf(FmSettings.darkMode(this@MainActivity)) }
+            LocalFileManagerTheme(darkTheme = dark.value) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    FileManagerApp()
+                    FileManagerApp(darkMode = dark.value, onDarkMode = {
+                        dark.value = it
+                        FmSettings.setDarkMode(this@MainActivity, it)
+                    })
                 }
             }
         }
@@ -140,7 +156,7 @@ private object ServerHolder {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FileManagerApp() {
+private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
     val context = LocalContext.current
     val storageRoot = remember { defaultStorageRoot() }
 
@@ -162,6 +178,15 @@ private fun FileManagerApp() {
     var showHidden by rememberSaveable { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var showQr by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf(setOf<String>()) }
+    var selecting by remember { mutableStateOf(false) }
+    var previewFile by remember { mutableStateOf<File?>(null) }
+    var showSettings by remember { mutableStateOf(false) }
+    var shortcut by remember { mutableStateOf("all") }
+    var recursive by remember { mutableStateOf(false) }
+    var webPass by remember { mutableStateOf(FmSettings.webPassword(context)) }
+    var hideSizes by remember { mutableStateOf(FmSettings.hideSizes(context)) }
+
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -176,17 +201,27 @@ private fun FileManagerApp() {
         entries = listFilesSafe(currentDir, showHidden)
         serverRunning = ServerHolder.server?.isAlive == true
         ServerHolder.server?.shareRoot = currentDir
+        ServerHolder.server?.sharePassword = FmSettings.webPassword(context)
+        ServerHolder.server?.hideSizes = FmSettings.hideSizes(context)
     }
 
     LaunchedEffect(currentDir, showHidden) {
         entries = listFilesSafe(currentDir, showHidden)
         ServerHolder.server?.shareRoot = currentDir
+        ServerHolder.server?.sharePassword = FmSettings.webPassword(context)
+        ServerHolder.server?.hideSizes = FmSettings.hideSizes(context)
     }
 
-    val visibleFiles = remember(entries, query, sortMode) {
-        entries
-            .filter { query.isBlank() || it.name.contains(query, ignoreCase = true) }
-            .sortedWith(sortComparator(sortMode))
+    val visibleFiles = remember(entries, query, sortMode, recursive, currentDir, shortcut) {
+        val base = when (shortcut) {
+            "fav" -> FmSettings.favorites(context).map { File(it) }.filter { it.exists() }
+            "recent" -> FmSettings.recents(context).map { File(it) }.filter { it.exists() }
+            else -> entries
+        }
+        val searched = if (query.isBlank()) base
+        else if (recursive && shortcut == "all") searchRecursive(currentDir, query)
+        else base.filter { it.name.contains(query, ignoreCase = true) }
+        searched.sortedWith(sortComparator(sortMode))
     }
 
     val shareUrl = remember(localIp, serverRunning) {
@@ -210,7 +245,7 @@ private fun FileManagerApp() {
             CenterAlignedTopAppBar(
                 title = {
                     Text(
-                        text = currentDir.name.ifBlank { "Bo nho" },
+                        text = currentDir.name.ifBlank { "Bộ nhớ" },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         fontWeight = FontWeight.SemiBold
@@ -221,14 +256,14 @@ private fun FileManagerApp() {
                         IconButton(onClick = { currentDir.parentFile?.let { currentDir = it } }) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                                contentDescription = "Quay lai thu muc cha"
+                                contentDescription = "Quay lại thư mục cha"
                             )
                         }
                     } else {
                         IconButton(onClick = { }) {
                             Icon(
                                 imageVector = Icons.Outlined.SdStorage,
-                                contentDescription = "Bo nho trong"
+                                contentDescription = "Bộ nhớ trong"
                             )
                         }
                     }
@@ -237,35 +272,38 @@ private fun FileManagerApp() {
                     IconButton(onClick = { showHidden = !showHidden }) {
                         Icon(
                             imageVector = if (showHidden) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
-                            contentDescription = "An hien tep an"
+                            contentDescription = "Ẩn hiện tệp ẩn"
                         )
                     }
                     IconButton(onClick = { showSortMenu = true }) {
-                        Icon(Icons.Outlined.Sort, contentDescription = "Sap xep")
+                        Icon(Icons.Outlined.Sort, contentDescription = "Sắp xếp")
                     }
                     DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
-                        DropdownMenuItem(text = { Text("Theo ten") }, onClick = {
+                        DropdownMenuItem(text = { Text("Theo tên") }, onClick = {
                             sortMode = SortMode.NAME
                             showSortMenu = false
                         })
-                        DropdownMenuItem(text = { Text("Theo ngay") }, onClick = {
+                        DropdownMenuItem(text = { Text("Theo ngày") }, onClick = {
                             sortMode = SortMode.DATE
                             showSortMenu = false
                         })
-                        DropdownMenuItem(text = { Text("Theo dung luong") }, onClick = {
+                        DropdownMenuItem(text = { Text("Theo dung lượng") }, onClick = {
                             sortMode = SortMode.SIZE
                             showSortMenu = false
                         })
-                        DropdownMenuItem(text = { Text("Theo loai") }, onClick = {
+                        DropdownMenuItem(text = { Text("Theo loại") }, onClick = {
                             sortMode = SortMode.TYPE
                             showSortMenu = false
                         })
                     }
                     IconButton(onClick = { refresh() }) {
-                        Icon(Icons.Outlined.Refresh, contentDescription = "Lam moi")
+                        Icon(Icons.Outlined.Refresh, contentDescription = "Làm mới")
+                    }
+                    IconButton(onClick = { showSettings = true }) {
+                        Icon(Icons.Outlined.Settings, contentDescription = "Cài đặt")
                     }
                     IconButton(onClick = { showGuide = true }) {
-                        Icon(Icons.Outlined.Info, contentDescription = "Huong dan")
+                        Icon(Icons.Outlined.Info, contentDescription = "Hướng dẫn")
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -281,7 +319,7 @@ private fun FileManagerApp() {
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.CreateNewFolder,
-                        contentDescription = "Tao thu muc"
+                        contentDescription = "Tạo thư mục"
                     )
                 }
             }
@@ -295,6 +333,27 @@ private fun FileManagerApp() {
             PathBar(path = currentDir.absolutePath)
             StorageBar(dir = currentDir)
 
+            ShortcutRow(
+                current = shortcut,
+                onPick = { shortcut = it },
+                onPictures = {
+                    shortcut = "all"
+                    currentDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
+                },
+                onDownload = {
+                    shortcut = "all"
+                    currentDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                },
+                onDocs = {
+                    shortcut = "all"
+                    currentDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS)
+                },
+                onDcim = {
+                    shortcut = "all"
+                    currentDir = File(android.os.Environment.getExternalStorageDirectory(), "DCIM")
+                }
+            )
+
             ServerControlPanel(
                 running = serverRunning,
                 ip = localIp,
@@ -302,15 +361,15 @@ private fun FileManagerApp() {
                 onCopyUrl = {
                     val url = shareUrl
                     if (url.isNullOrBlank()) {
-                        toast(context, "Chua co dia chi IP")
+                        toast(context, "Chưa có địa chỉ IP")
                     } else {
                         copyToClipboard(context, url)
-                        toast(context, "Da copy $url")
+                        toast(context, "Đã copy $url")
                     }
                 },
                 onShowQr = {
                     if (shareUrl.isNullOrBlank() || !serverRunning) {
-                        toast(context, "Hay bat Web Share truoc")
+                        toast(context, "Hãy bật Web Share trước")
                     } else {
                         showQr = true
                     }
@@ -321,7 +380,7 @@ private fun FileManagerApp() {
                         serverRunning = started
                         localIp = NetworkUtils.getLocalWifiIpv4(context)
                         if (!started) {
-                            toast(context, "Khong the mo cong 8080. Kiem tra Wi-Fi hoac cong dang ban.")
+                            toast(context, "Không thể mở cổng 8080. Kiểm tra Wi-Fi hoặc cổng đang bận.")
                         }
                     } else {
                         stopServer()
@@ -339,14 +398,68 @@ private fun FileManagerApp() {
             }
 
             SearchRow(query = query, onQuery = { query = it }, count = visibleFiles.size)
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Tìm cả cây thư mục", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Switch(checked = recursive, onCheckedChange = { recursive = it })
+            }
+            if (selecting || selected.isNotEmpty()) {
+                SelectionBar(
+                    count = selected.size,
+                    hasClip = ClipHolder.clip != null,
+                    onClear = { selected = emptySet(); selecting = false },
+                    onDelete = {
+                        selected.map { File(it) }.forEach { deleteRecursivelySafe(it) }
+                        selected = emptySet(); selecting = false
+                        entries = listFilesSafe(currentDir, showHidden)
+                    },
+                    onCopy = {
+                        ClipHolder.clip = ClipBoard(selected.toList(), false)
+                        toast(context, "Đã copy ${selected.size} mục")
+                    },
+                    onCut = {
+                        ClipHolder.clip = ClipBoard(selected.toList(), true)
+                        toast(context, "Đã cắt ${selected.size} mục")
+                    },
+                    onPaste = {
+                        val n = pasteClip(currentDir)
+                        toast(context, if (n >= 0) "Đã dán $n mục" else "Không dán được")
+                        entries = listFilesSafe(currentDir, showHidden)
+                    },
+                    onZip = {
+                        val dest = File(currentDir, "archive_${System.currentTimeMillis()}.zip")
+                        val ok = ZipUtils.zipTo(selected.map { File(it) }, dest)
+                        toast(context, if (ok) "Đã nén ${dest.name}" else "Không nén được")
+                        selected = emptySet(); selecting = false
+                        entries = listFilesSafe(currentDir, showHidden)
+                    },
+                    onShare = {
+                        shareFiles(context, selected.map { File(it) }.filter { it.isFile })
+                    }
+                )
+            }
 
             FileList(
                 files = visibleFiles,
+                selected = selected,
+                selecting = selecting,
+                onToggleSelect = { file ->
+                    selecting = true
+                    selected = if (file.absolutePath in selected) selected - file.absolutePath else selected + file.absolutePath
+                },
                 onOpen = { file ->
-                    if (file.isDirectory) {
+                    if (selecting) {
+                        selected = if (file.absolutePath in selected) selected - file.absolutePath else selected + file.absolutePath
+                    } else if (file.isDirectory) {
                         currentDir = file
                     } else {
-                        openFile(context, file)
+                        FmSettings.addRecent(context, file.absolutePath)
+                        when {
+                            isImage(file) || isMedia(file) || isText(file) || isPdf(file) -> previewFile = file
+                            else -> openFile(context, file)
+                        }
                     }
                 },
                 onRequestMenu = { menuFor = it },
@@ -370,7 +483,7 @@ private fun FileManagerApp() {
                 },
                 onDuplicate = {
                     val ok = duplicateSafe(it)
-                    toast(context, if (ok) "Da tao ban sao" else "Khong sao chep duoc")
+                    toast(context, if (ok) "Đã tạo bản sao" else "Không sao chép được")
                     menuFor = null
                     entries = listFilesSafe(currentDir, showHidden)
                 }
@@ -398,7 +511,7 @@ private fun FileManagerApp() {
             onDismiss = { pendingDelete = null },
             onConfirm = {
                 val ok = deleteRecursivelySafe(target)
-                toast(context, if (ok) "Da xoa ${target.name}" else "Khong xoa duoc")
+                toast(context, if (ok) "Đã xoá ${target.name}" else "Không xoá được")
                 pendingDelete = null
                 entries = listFilesSafe(currentDir, showHidden)
             }
@@ -411,7 +524,7 @@ private fun FileManagerApp() {
             onDismiss = { pendingRename = null },
             onConfirm = { newName ->
                 val result = renameSafe(target, newName)
-                toast(context, result ?: "Da doi ten")
+                toast(context, result ?: "Đã đổi tên")
                 pendingRename = null
                 entries = listFilesSafe(currentDir, showHidden)
             }
@@ -427,7 +540,7 @@ private fun FileManagerApp() {
             onDismiss = { showCreateFolder = false },
             onConfirm = { name ->
                 val created = createFolderSafe(currentDir, name)
-                toast(context, if (created) "Da tao thu muc" else "Khong tao duoc thu muc")
+                toast(context, if (created) "Đã tạo thư mục" else "Không tạo được thư mục")
                 showCreateFolder = false
                 entries = listFilesSafe(currentDir, showHidden)
             }
@@ -440,6 +553,36 @@ private fun FileManagerApp() {
             onDismiss = { showQr = false }
         )
     }
+
+    previewFile?.let { f ->
+        when {
+            isImage(f) -> ImagePreviewDialog(f) { previewFile = null }
+            isMedia(f) -> MediaPreviewDialog(f) { previewFile = null }
+            isText(f) -> TextPreviewDialog(f) { previewFile = null }
+            isPdf(f) -> PdfPreviewDialog(f) { previewFile = null }
+            else -> previewFile = null
+        }
+    }
+
+    if (showSettings) {
+        SettingsDialog(
+            dark = darkMode,
+            password = webPass,
+            hideSizes = hideSizes,
+            onDark = onDarkMode,
+            onPassword = {
+                webPass = it
+                FmSettings.setWebPassword(context, it)
+                ServerHolder.server?.sharePassword = it
+            },
+            onHideSizes = {
+                hideSizes = it
+                FmSettings.setHideSizes(context, it)
+                ServerHolder.server?.hideSizes = it
+            },
+            onDismiss = { showSettings = false }
+        )
+    }
 }
 
 @Composable
@@ -447,7 +590,7 @@ private fun StorageBar(dir: File) {
     val usable = dir.usableSpace
     val total = dir.totalSpace.takeIf { it > 0 } ?: return
     Text(
-        text = "Con trong ${formatSize(usable)} / ${formatSize(total)}",
+        text = "Còn trống ${formatSize(usable)} / ${formatSize(total)}",
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 20.dp, vertical = 0.dp)
@@ -463,7 +606,7 @@ private fun SearchRow(query: String, onQuery: (String) -> Unit, count: Int) {
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         singleLine = true,
-        label = { Text("Tim trong thu muc") },
+        label = { Text("Tìm trong thư mục") },
         leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
         trailingIcon = {
             Text(
@@ -482,13 +625,13 @@ private fun QrShareDialog(url: String, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Outlined.QrCode2, contentDescription = null) },
-        title = { Text("Quet de mo Web Share") },
+        title = { Text("Quét để mở Web Share") },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 if (bitmap != null) {
                     Image(
                         bitmap = bitmap.asImageBitmap(),
-                        contentDescription = "Ma QR Web Share",
+                        contentDescription = "Mã QR Web Share",
                         modifier = Modifier
                             .size(220.dp)
                             .clip(RoundedCornerShape(12.dp)),
@@ -501,7 +644,7 @@ private fun QrShareDialog(url: String, onDismiss: () -> Unit) {
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Dong") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
     )
 }
 
@@ -545,7 +688,7 @@ private fun ServerControlPanel(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = if (running) Icons.Outlined.Wifi else Icons.Outlined.WifiOff,
-                    contentDescription = if (running) "Server dang bat" else "Server dang tat",
+                    contentDescription = if (running) "Server đang bật" else "Server đang tắt",
                     tint = if (running) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -557,7 +700,7 @@ private fun ServerControlPanel(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = if (running) "Dang phat tren cong 8080" else "May chu dang tat",
+                        text = if (running) "Đang phát trên cổng 8080" else "Máy chủ đang tắt",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -576,7 +719,7 @@ private fun ServerControlPanel(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Outlined.Share,
-                    contentDescription = "Dia chi chia se",
+                    contentDescription = "Địa chỉ chia sẻ",
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -584,20 +727,20 @@ private fun ServerControlPanel(
                 SelectionContainer(modifier = Modifier.weight(1f)) {
                     Text(
                         text = when {
-                            !canStart -> "Can quyen bo nho truoc khi mo server"
+                            !canStart -> "Cần quyền bộ nhớ trước khi mở server"
                             url != null && running -> url
-                            url != null -> "San sang: $url"
-                            else -> "Khong lay duoc IP Wi-Fi (192.168.x.x)"
+                            url != null -> "Sẵn sàng: $url"
+                            else -> "Không lấy được IP Wi-Fi (192.168.x.x)"
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
                 IconButton(onClick = onCopyUrl) {
-                    Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy dia chi")
+                    Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy địa chỉ")
                 }
                 IconButton(onClick = onShowQr) {
-                    Icon(Icons.Outlined.QrCode2, contentDescription = "Ma QR")
+                    Icon(Icons.Outlined.QrCode2, contentDescription = "Mã QR")
                 }
             }
         }
@@ -619,17 +762,17 @@ private fun PermissionBanner(onGrant: () -> Unit) {
             modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Outlined.Lock, contentDescription = "Thieu quyen")
+            Icon(Icons.Outlined.Lock, contentDescription = "Thiếu quyền")
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text("Can quyen quan ly tep", fontWeight = FontWeight.Medium)
+                Text("Cần quyền quản lý tệp", fontWeight = FontWeight.Medium)
                 Text(
-                    "Mo cai dat va bat All files access.",
+                    "Mở cài đặt và bật All files access.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            FilledTonalButton(onClick = onGrant) { Text("Cap quyen") }
+            FilledTonalButton(onClick = onGrant) { Text("Cấp quyền") }
         }
     }
 }
@@ -637,6 +780,9 @@ private fun PermissionBanner(onGrant: () -> Unit) {
 @Composable
 private fun FileList(
     files: List<File>,
+    selected: Set<String> = emptySet(),
+    selecting: Boolean = false,
+    onToggleSelect: (File) -> Unit = {},
     onOpen: (File) -> Unit,
     onRequestMenu: (File) -> Unit,
     menuFor: File?,
@@ -657,13 +803,13 @@ private fun FileList(
         ) {
             Icon(
                 imageVector = Icons.Outlined.FolderOpen,
-                contentDescription = "Thu muc trong",
+                contentDescription = "Thư mục trống",
                 modifier = Modifier.size(48.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                "Khong co tep nao",
+                "Không có tệp nào",
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -677,6 +823,9 @@ private fun FileList(
         items(files, key = { it.absolutePath }) { file ->
             FileRow(
                 file = file,
+                selected = file.absolutePath in selected,
+                selecting = selecting,
+                onToggleSelect = { onToggleSelect(file) },
                 menuExpanded = menuFor?.absolutePath == file.absolutePath,
                 onOpen = { onOpen(file) },
                 onRequestMenu = { onRequestMenu(file) },
@@ -694,6 +843,9 @@ private fun FileList(
 @Composable
 private fun FileRow(
     file: File,
+    selected: Boolean = false,
+    selecting: Boolean = false,
+    onToggleSelect: () -> Unit = {},
     menuExpanded: Boolean,
     onOpen: () -> Unit,
     onRequestMenu: () -> Unit,
@@ -712,9 +864,10 @@ private fun FileRow(
             .padding(horizontal = 8.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        Checkbox(checked = selected, onCheckedChange = { onToggleSelect() })
         Icon(
             imageVector = iconFor(file),
-            contentDescription = if (file.isDirectory) "Thu muc" else "Tep",
+            contentDescription = if (file.isDirectory) "Thư mục" else "Tệp",
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(28.dp)
         )
@@ -733,35 +886,71 @@ private fun FileRow(
             )
         }
         IconButton(onClick = onRequestMenu) {
-            Icon(Icons.Outlined.MoreVert, contentDescription = "Tuy chon")
+            Icon(Icons.Outlined.MoreVert, contentDescription = "Tùy chọn")
         }
         DropdownMenu(expanded = menuExpanded, onDismissRequest = onDismissMenu) {
             DropdownMenuItem(
-                text = { Text("Mo") },
+                text = { Text("Mở") },
                 onClick = onOpenFile,
                 leadingIcon = {
                     Icon(Icons.Outlined.FolderOpen, contentDescription = null)
                 }
             )
             DropdownMenuItem(
-                text = { Text("Chi tiet") },
+                text = { Text("Chi tiết") },
                 onClick = onDetails,
                 leadingIcon = { Icon(Icons.Outlined.Info, contentDescription = null) }
             )
             DropdownMenuItem(
-                text = { Text("Doi ten") },
+                text = { Text(if (FmSettings.isFavorite(LocalContext.current, file.absolutePath)) "Bỏ yêu thích" else "Yêu thích") },
+                onClick = {
+                    FmSettings.toggleFavorite(onOpen.let { LocalContext.current }, file.absolutePath)
+                    onDismissMenu()
+                },
+                leadingIcon = { Icon(Icons.Outlined.Star, contentDescription = null) }
+            )
+            DropdownMenuItem(
+                text = { Text("Chia sẻ") },
+                onClick = {
+                    shareFiles(LocalContext.current, listOf(file))
+                    onDismissMenu()
+                },
+                leadingIcon = { Icon(Icons.Outlined.Share, contentDescription = null) }
+            )
+            DropdownMenuItem(
+                text = { Text("Nén ZIP") },
+                onClick = {
+                    val dest = File(file.parentFile, file.nameWithoutExtension + ".zip")
+                    val ok = ZipUtils.zipTo(listOf(file), dest)
+                    android.widget.Toast.makeText(LocalContext.current, if (ok) "Đã nén" else "Lỗi nén", android.widget.Toast.LENGTH_SHORT).show()
+                    onDismissMenu()
+                },
+                leadingIcon = { Icon(Icons.Outlined.Archive, contentDescription = null) }
+            )
+            DropdownMenuItem(
+                text = { Text("Giải nén") },
+                onClick = {
+                    val dest = File(file.parentFile, file.nameWithoutExtension)
+                    val err = ZipUtils.unzip(file, dest)
+                    android.widget.Toast.makeText(LocalContext.current, err ?: "Đã giải nén", android.widget.Toast.LENGTH_SHORT).show()
+                    onDismissMenu()
+                },
+                leadingIcon = { Icon(Icons.Outlined.Unarchive, contentDescription = null) }
+            )
+            DropdownMenuItem(
+                text = { Text("Đổi tên") },
                 onClick = onRename,
                 leadingIcon = {
                     Icon(Icons.Outlined.DriveFileRenameOutline, contentDescription = null)
                 }
             )
             DropdownMenuItem(
-                text = { Text("Tao ban sao") },
+                text = { Text("Tạo bản sao") },
                 onClick = onDuplicate,
                 leadingIcon = { Icon(Icons.Outlined.FileCopy, contentDescription = null) }
             )
             DropdownMenuItem(
-                text = { Text("Xoa") },
+                text = { Text("Xoá") },
                 onClick = onDelete,
                 leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) }
             )
@@ -780,20 +969,20 @@ private fun FirstLaunchDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Outlined.Info, contentDescription = null) },
-        title = { Text("Chao mung") },
+        title = { Text("Chào mừng") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Ba buoc de dung Local File Manager & Web Share:")
-                GuideStep(1, "Cap quyen quan ly tat ca tep (All files access).")
-                GuideStep(2, "Ket noi dien thoai va may tinh cung mot Wi-Fi.")
-                GuideStep(3, "Bat cong tac Web Share roi mo dia chi http://IP:8080 tren trinh duyet.")
+                Text("Ba bước để dùng Local File Manager & Web Share:")
+                GuideStep(1, "Cấp quyền quản lý tất cả tệp (All files access).")
+                GuideStep(2, "Kết nối điện thoại và máy tính cùng một Wi-Fi.")
+                GuideStep(3, "Bật công tắc Web Share rồi mở địa chỉ http://IP:8080 trên trình duyệt.")
             }
         },
         confirmButton = {
-            TextButton(onClick = onGrantPermission) { Text("Cap quyen") }
+            TextButton(onClick = onGrantPermission) { Text("Cấp quyền") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("De sau") }
+            TextButton(onClick = onDismiss) { Text("Để sau") }
         }
     )
 }
@@ -815,18 +1004,18 @@ private fun ConfirmDeleteDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
-        title = { Text("Xoa muc nay?") },
+        title = { Text("Xoá mục này?") },
         text = {
             Text(
                 if (file.isDirectory) {
-                    "Thu muc \"${file.name}\" va toan bo noi dung se bi xoa vinh vien."
+                    "Thư mục \"${file.name}\" và toàn bộ nội dung sẽ bị xoá vĩnh viễn."
                 } else {
-                    "Tep \"${file.name}\" se bi xoa vinh vien."
+                    "Tệp \"${file.name}\" sẽ bị xoá vĩnh viễn."
                 }
             )
         },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Xoa") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Huy") } }
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Xoá") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Huỷ") } }
     )
 }
 
@@ -840,22 +1029,22 @@ private fun RenameDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Outlined.DriveFileRenameOutline, contentDescription = null) },
-        title = { Text("Doi ten") },
+        title = { Text("Đổi tên") },
         text = {
             OutlinedTextField(
                 value = value,
                 onValueChange = { value = it },
                 singleLine = true,
-                label = { Text("Ten moi") }
+                label = { Text("Tên mới") }
             )
         },
         confirmButton = {
             TextButton(
                 enabled = value.isNotBlank() && value != file.name,
                 onClick = { onConfirm(value.trim()) }
-            ) { Text("Luu") }
+            ) { Text("Lưu") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Huy") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Huỷ") } }
     )
 }
 
@@ -868,22 +1057,22 @@ private fun CreateFolderDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Outlined.CreateNewFolder, contentDescription = null) },
-        title = { Text("Tao thu muc") },
+        title = { Text("Tạo thư mục") },
         text = {
             OutlinedTextField(
                 value = value,
                 onValueChange = { value = it },
                 singleLine = true,
-                label = { Text("Ten thu muc") }
+                label = { Text("Tên thư mục") }
             )
         },
         confirmButton = {
             TextButton(
                 enabled = value.isNotBlank(),
                 onClick = { onConfirm(value.trim()) }
-            ) { Text("Tao") }
+            ) { Text("Tạo") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Huy") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Huỷ") } }
     )
 }
 
@@ -892,20 +1081,20 @@ private fun FileDetailsDialog(file: File, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Outlined.Info, contentDescription = null) },
-        title = { Text("Chi tiet") },
+        title = { Text("Chi tiết") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                DetailLine("Ten", file.name)
-                DetailLine("Loai", if (file.isDirectory) "Thu muc" else file.extension.ifBlank { "Tep" })
-                DetailLine("Duong dan", file.absolutePath)
+                DetailLine("Tên", file.name)
+                DetailLine("Loại", if (file.isDirectory) "Thư mục" else file.extension.ifBlank { "Tệp" })
+                DetailLine("Đường dẫn", file.absolutePath)
                 DetailLine(
-                    "Kich thuoc",
+                    "Kích thước",
                     if (file.isDirectory) "—" else formatSize(file.length())
                 )
-                DetailLine("Sua doi", DATE_FMT.format(Date(file.lastModified())))
+                DetailLine("Sửa đổi", DATE_FMT.format(Date(file.lastModified())))
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Dong") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
     )
 }
 
@@ -915,6 +1104,97 @@ private fun DetailLine(label: String, value: String) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.bodyMedium)
     }
+}
+
+
+@Composable
+private fun ShortcutRow(
+    current: String,
+    onPick: (String) -> Unit,
+    onPictures: () -> Unit,
+    onDownload: () -> Unit,
+    onDocs: () -> Unit,
+    onDcim: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        FilterChip(selected = current == "all", onClick = { onPick("all") }, label = { Text("Tất cả") })
+        FilterChip(selected = false, onClick = onPictures, label = { Text("Ảnh") })
+        FilterChip(selected = false, onClick = onDownload, label = { Text("Tải xuống") })
+        FilterChip(selected = false, onClick = onDocs, label = { Text("Tài liệu") })
+        FilterChip(selected = false, onClick = onDcim, label = { Text("DCIM") })
+        FilterChip(selected = current == "fav", onClick = { onPick("fav") }, label = { Text("Yêu thích") })
+        FilterChip(selected = current == "recent", onClick = { onPick("recent") }, label = { Text("Gần đây") })
+    }
+}
+
+@Composable
+private fun SelectionBar(
+    count: Int,
+    hasClip: Boolean,
+    onClear: () -> Unit,
+    onDelete: () -> Unit,
+    onCopy: () -> Unit,
+    onCut: () -> Unit,
+    onPaste: () -> Unit,
+    onZip: () -> Unit,
+    onShare: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("$count đã chọn", modifier = Modifier.padding(end = 8.dp))
+        TextButton(onClick = onCopy) { Text("Copy") }
+        TextButton(onClick = onCut) { Text("Cắt") }
+        if (hasClip) TextButton(onClick = onPaste) { Text("Dán") }
+        TextButton(onClick = onZip) { Text("ZIP") }
+        TextButton(onClick = onShare) { Text("Chia sẻ") }
+        TextButton(onClick = onDelete) { Text("Xoá") }
+        TextButton(onClick = onClear) { Text("Huỷ") }
+    }
+}
+
+@Composable
+private fun SettingsDialog(
+    dark: Boolean,
+    password: String,
+    hideSizes: Boolean,
+    onDark: (Boolean) -> Unit,
+    onPassword: (String) -> Unit,
+    onHideSizes: (Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var pass by rememberSaveable { mutableStateOf(password) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Cài đặt") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Giao diện tối", modifier = Modifier.weight(1f))
+                    Switch(checked = dark, onCheckedChange = onDark)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Ẩn dung lượng trên Web Share", modifier = Modifier.weight(1f))
+                    Switch(checked = hideSizes, onCheckedChange = onHideSizes)
+                }
+                OutlinedTextField(
+                    value = pass,
+                    onValueChange = { pass = it; onPassword(it) },
+                    label = { Text("Mật khẩu Web Share (trống = không)") },
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Xong") } }
+    )
 }
 
 // -----------------------------------------------------------------------------
@@ -937,7 +1217,7 @@ private fun subtitleFor(file: File): String {
     val time = DATE_FMT.format(Date(file.lastModified()))
     return if (file.isDirectory) {
         val count = file.listFiles()?.size ?: 0
-        "$count muc  ·  $time"
+        "$count mục  ·  $time"
     } else {
         "${formatSize(file.length())}  ·  $time"
     }
@@ -1028,6 +1308,8 @@ private fun startServer(context: Context, root: File): Boolean {
     stopServer()
     return try {
         val server = LocalWebServer(LocalWebServer.DEFAULT_PORT, root)
+        server.sharePassword = FmSettings.webPassword(context)
+        server.hideSizes = FmSettings.hideSizes(context)
         server.start()
         ServerHolder.server = server
         true
@@ -1058,11 +1340,11 @@ private fun deleteRecursivelySafe(file: File): Boolean {
 private fun renameSafe(file: File, newName: String): String? {
     val cleaned = newName.trim()
     if (cleaned.isEmpty() || cleaned.contains("/") || cleaned.contains("\\")) {
-        return "Ten khong hop le"
+        return "Tên không hợp lệ"
     }
     val dest = File(file.parentFile, cleaned)
-    if (dest.exists()) return "Ten da ton tai"
-    return if (file.renameTo(dest)) null else "Doi ten that bai"
+    if (dest.exists()) return "Tên đã tồn tại"
+    return if (file.renameTo(dest)) null else "Đổi tên thất bại"
 }
 
 private fun createFolderSafe(parent: File, name: String): Boolean {
@@ -1086,9 +1368,9 @@ private fun openFile(context: Context, file: File) {
             setDataAndType(uri, mime)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, "Mo tep bang"))
+        context.startActivity(Intent.createChooser(intent, "Mở tệp bằng"))
     } catch (_: Exception) {
-        toast(context, "Khong ung dung nao mo duoc tep nay")
+        toast(context, "Không ứng dụng nào mở được tệp này")
     }
 }
 
@@ -1111,6 +1393,73 @@ private fun markFirstLaunchDone(context: Context) {
         .edit()
         .putBoolean(KEY_FIRST_LAUNCH, true)
         .apply()
+}
+
+
+private fun searchRecursive(root: File, q: String, limit: Int = 300): List<File> {
+    val out = mutableListOf<File>()
+    fun walk(dir: File) {
+        if (out.size >= limit || !dir.isDirectory) return
+        dir.listFiles().orEmpty().forEach { f ->
+            if (out.size >= limit) return
+            if (f.name.contains(q, ignoreCase = true)) out.add(f)
+            if (f.isDirectory && !f.name.startsWith(".")) walk(f)
+        }
+    }
+    walk(root)
+    return out
+}
+
+private fun pasteClip(destDir: File): Int {
+    val clip = ClipHolder.clip ?: return -1
+    var n = 0
+    clip.paths.forEach { path ->
+        val src = File(path)
+        if (!src.exists()) return@forEach
+        val target = uniqueCopyName(destDir, src)
+        try {
+            if (clip.cut) {
+                if (src.renameTo(target)) n++ else {
+                    if (src.isDirectory) src.copyRecursively(target) else src.copyTo(target)
+                    src.deleteRecursively(); n++
+                }
+            } else {
+                if (src.isDirectory) src.copyRecursively(target) else src.copyTo(target)
+                n++
+            }
+        } catch (_: Exception) {}
+    }
+    if (clip.cut) ClipHolder.clip = null
+    return n
+}
+
+private fun shareFiles(context: android.content.Context, files: List<File>) {
+    val existing = files.filter { it.exists() && it.isFile }
+    if (existing.isEmpty()) {
+        toast(context, "Không có tệp để chia sẻ")
+        return
+    }
+    try {
+        val uris = ArrayList<android.net.Uri>(existing.map {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it)
+        })
+        val intent = if (uris.size == 1) {
+            Intent(Intent.ACTION_SEND).apply {
+                type = "*/*"
+                putExtra(Intent.EXTRA_STREAM, uris[0])
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        } else {
+            Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = "*/*"
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
+        context.startActivity(Intent.createChooser(intent, "Chia sẻ"))
+    } catch (_: Exception) {
+        toast(context, "Không chia sẻ được")
+    }
 }
 
 private fun toast(context: Context, message: String) {
