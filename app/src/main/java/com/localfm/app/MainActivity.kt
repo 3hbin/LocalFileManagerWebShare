@@ -856,6 +856,7 @@ private fun FileRow(
     onOpenFile: () -> Unit,
     onDuplicate: () -> Unit
 ) {
+    val ctx = LocalContext.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -902,9 +903,9 @@ private fun FileRow(
                 leadingIcon = { Icon(Icons.Outlined.Info, contentDescription = null) }
             )
             DropdownMenuItem(
-                text = { Text(if (FmSettings.isFavorite(LocalContext.current, file.absolutePath)) "Bỏ yêu thích" else "Yêu thích") },
+                text = { Text(if (FmSettings.isFavorite(ctx, file.absolutePath)) "Bỏ yêu thích" else "Yêu thích") },
                 onClick = {
-                    FmSettings.toggleFavorite(onOpen.let { LocalContext.current }, file.absolutePath)
+                    FmSettings.toggleFavorite(ctx, file.absolutePath)
                     onDismissMenu()
                 },
                 leadingIcon = { Icon(Icons.Outlined.Star, contentDescription = null) }
@@ -912,7 +913,7 @@ private fun FileRow(
             DropdownMenuItem(
                 text = { Text("Chia sẻ") },
                 onClick = {
-                    shareFiles(LocalContext.current, listOf(file))
+                    shareFiles(ctx, listOf(file))
                     onDismissMenu()
                 },
                 leadingIcon = { Icon(Icons.Outlined.Share, contentDescription = null) }
@@ -922,7 +923,7 @@ private fun FileRow(
                 onClick = {
                     val dest = File(file.parentFile, file.nameWithoutExtension + ".zip")
                     val ok = ZipUtils.zipTo(listOf(file), dest)
-                    android.widget.Toast.makeText(LocalContext.current, if (ok) "Đã nén" else "Lỗi nén", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(ctx, if (ok) "Đã nén" else "Lỗi nén", android.widget.Toast.LENGTH_SHORT).show()
                     onDismissMenu()
                 },
                 leadingIcon = { Icon(Icons.Outlined.Archive, contentDescription = null) }
@@ -932,7 +933,7 @@ private fun FileRow(
                 onClick = {
                     val dest = File(file.parentFile, file.nameWithoutExtension)
                     val err = ZipUtils.unzip(file, dest)
-                    android.widget.Toast.makeText(LocalContext.current, err ?: "Đã giải nén", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(ctx, err ?: "Đã giải nén", android.widget.Toast.LENGTH_SHORT).show()
                     onDismissMenu()
                 },
                 leadingIcon = { Icon(Icons.Outlined.Unarchive, contentDescription = null) }
