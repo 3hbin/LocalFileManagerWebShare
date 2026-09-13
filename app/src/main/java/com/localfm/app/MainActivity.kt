@@ -68,6 +68,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material.icons.outlined.ContentCut
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.Android
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Unarchive
 import androidx.compose.material.icons.outlined.Star
@@ -119,6 +120,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -1078,24 +1080,28 @@ private fun FileRow(
         if (selecting) {
             Checkbox(checked = selected, onCheckedChange = { onToggleSelect() })
         }
-        val thumb = remember(file.absolutePath) {
+        val apkLike = file.extension.lowercase() in setOf("apk", "xapk", "apks")
+        val thumb = remember(file.absolutePath, file.lastModified()) {
             when {
                 isImage(file) -> ThumbCache.image(file)
                 file.extension.lowercase() in setOf("mp4","mkv","webm","3gp") -> ThumbCache.video(file)
+                apkLike -> ThumbCache.apk(ctx, file)
                 else -> null
             }
         }
-        if (thumb != null) {
-            Image(bitmap = thumb.asImageBitmap(), contentDescription = file.name,
+        when {
+            thumb != null -> Image(
+                bitmap = thumb.asImageBitmap(),
+                contentDescription = file.name,
                 modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)),
-                contentScale = ContentScale.Crop)
-        } else {
-        Icon(
-            imageVector = iconFor(file),
-            contentDescription = if (file.isDirectory) "Thư mục" else "Tệp",
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(28.dp)
-        )
+                contentScale = ContentScale.Crop
+            )
+            else -> Image(
+                painter = painterResource(typeIconRes(file)),
+                contentDescription = file.name,
+                modifier = Modifier.size(40.dp),
+                contentScale = ContentScale.Fit
+            )
         }
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -1469,6 +1475,42 @@ private fun SettingsDialog(
 // Icon & nhãn tệp (Material Icons, không emoji)
 // -----------------------------------------------------------------------------
 
+private val KNOWN_EXTS = setOf(
+    "pdf","png","jpg","jpeg","gif","webp","bmp","heic","svg",
+    "mp4","mkv","avi","webm","mov","3gp",
+    "mp3","wav","aac","ogg","m4a","flac",
+    "txt","md","log","json","xml","csv","html","htm","kt","java",
+    "doc","docx","xls","xlsx","ppt","pptx",
+    "zip","rar","7z","apk","xapk","apks"
+)
+
+private fun isKnownExt(file: File) =
+    file.isDirectory || file.extension.lowercase(Locale.US) in KNOWN_EXTS
+
+
+private fun typeIconRes(file: File): Int {
+    if (file.isDirectory) return R.drawable.ic_type_folder
+    return when (file.extension.lowercase(Locale.US)) {
+        "pdf" -> R.drawable.ic_type_pdf
+        "doc", "docx" -> R.drawable.ic_type_doc
+        "xls", "xlsx" -> R.drawable.ic_type_xls
+        "ppt", "pptx" -> R.drawable.ic_type_ppt
+        "txt", "md", "log" -> R.drawable.ic_type_txt
+        "csv" -> R.drawable.ic_type_csv
+        "json", "xml", "html", "htm" -> R.drawable.ic_type_code
+        "kt", "java", "js", "ts", "py", "c", "cpp", "h" -> R.drawable.ic_type_code2
+        "png", "jpg", "jpeg", "webp", "bmp", "heic", "svg" -> R.drawable.ic_type_image
+        "gif" -> R.drawable.ic_type_gif
+        "mp4", "mkv", "avi", "webm", "mov", "3gp" -> R.drawable.ic_type_video
+        "mp3", "wav", "aac", "ogg", "m4a", "flac" -> R.drawable.ic_type_audio
+        "zip", "rar", "7z" -> R.drawable.ic_type_zip
+        "apk", "xapk", "apks" -> R.drawable.ic_type_apk
+        "vcf" -> R.drawable.ic_type_contact
+        "ics" -> R.drawable.ic_type_calendar
+        else -> R.drawable.ic_type_unknown
+    }
+}
+
 private fun iconFor(file: File): ImageVector {
     if (file.isDirectory) return Icons.Outlined.Folder
     return when (file.extension.lowercase(Locale.US)) {
@@ -1477,6 +1519,7 @@ private fun iconFor(file: File): ImageVector {
         "mp4", "mkv", "avi", "webm", "mov" -> Icons.Outlined.Movie
         "mp3", "wav", "aac", "ogg", "m4a", "flac" -> Icons.Outlined.AudioFile
         "txt", "md", "log", "json", "xml", "doc", "docx" -> Icons.Outlined.Description
+        "apk", "xapk", "apks" -> Icons.Outlined.Android
         else -> Icons.AutoMirrored.Outlined.InsertDriveFile
     }
 }
@@ -1615,6 +1658,10 @@ private fun createFolderSafe(parent: File, name: String): Boolean {
 }
 
 private fun openFile(context: Context, file: File) {
+    if (ApkInstaller.isInstallable(file)) {
+        ApkInstaller.install(context, file)
+        return
+    }
     try {
         val uri = FileProvider.getUriForFile(
             context,

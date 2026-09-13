@@ -174,6 +174,48 @@ object ThumbCache {
             b?.also { mem.put("v:"+file.absolutePath, it) }
         } catch (_: Exception) { null }
     }
+
+    fun apk(ctx: Context, file: File): Bitmap? {
+        val key = "apk:" + file.absolutePath + ":" + file.lastModified()
+        mem.get(key)?.let { return it }
+        return try {
+            val path = resolveApkPath(ctx, file) ?: return null
+            val pm = ctx.packageManager
+            val pkg = pm.getPackageArchiveInfo(path, 0) ?: return null
+            val app = pkg.applicationInfo ?: return null
+            app.sourceDir = path
+            app.publicSourceDir = path
+            val d = app.loadIcon(pm) ?: return null
+            drawableToBitmap(d, 96)?.also { mem.put(key, it) }
+        } catch (_: Exception) { null }
+    }
+
+    private fun resolveApkPath(ctx: Context, file: File): String? {
+        val ext = file.extension.lowercase()
+        if (ext == "apk") return file.absolutePath
+        if (ext != "xapk" && ext != "apks") return null
+        val out = File(ctx.cacheDir, "xapk-icon-" + file.name.hashCode() + ".apk")
+        if (out.exists() && out.length() > 2048) return out.absolutePath
+        java.util.zip.ZipFile(file).use { z ->
+            val e = z.entries().toList()
+                .filter { !it.isDirectory && it.name.lowercase().endsWith(".apk") }
+                .filter { !it.name.lowercase().contains("config.") }
+                .maxByOrNull { it.size } ?: return null
+            z.getInputStream(e).use { ins -> out.outputStream().use { ins.copyTo(it) } }
+        }
+        return if (out.exists()) out.absolutePath else null
+    }
+
+    private fun drawableToBitmap(d: android.graphics.drawable.Drawable, size: Int): Bitmap? {
+        if (d is android.graphics.drawable.BitmapDrawable && d.bitmap != null) {
+            return Bitmap.createScaledBitmap(d.bitmap, size, size, true)
+        }
+        val b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(b)
+        d.setBounds(0, 0, size, size)
+        d.draw(c)
+        return b
+    }
 }
 
 object FolderSize {
