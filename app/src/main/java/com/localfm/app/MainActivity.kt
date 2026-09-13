@@ -305,50 +305,24 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showHidden = !showHidden }) {
-                        Icon(
-                            imageVector = if (showHidden) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
-                            contentDescription = "Ẩn hiện tệp ẩn"
-                        )
-                    }
                     IconButton(onClick = { showSortMenu = true }) {
                         Icon(Icons.Outlined.Sort, contentDescription = "Sắp xếp")
                     }
                     DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
-                        DropdownMenuItem(text = { Text("Theo tên") }, onClick = {
-                            sortMode = SortMode.NAME
-                            showSortMenu = false
-                        })
-                        DropdownMenuItem(text = { Text("Theo ngày") }, onClick = {
-                            sortMode = SortMode.DATE
-                            showSortMenu = false
-                        })
-                        DropdownMenuItem(text = { Text("Theo dung lượng") }, onClick = {
-                            sortMode = SortMode.SIZE
-                            showSortMenu = false
-                        })
-                        DropdownMenuItem(text = { Text("Theo loại") }, onClick = {
-                            sortMode = SortMode.TYPE
-                            showSortMenu = false
-                        })
+                        DropdownMenuItem(text = { Text("Theo tên") }, onClick = { sortMode = SortMode.NAME; showSortMenu = false })
+                        DropdownMenuItem(text = { Text("Theo ngày") }, onClick = { sortMode = SortMode.DATE; showSortMenu = false })
+                        DropdownMenuItem(text = { Text("Theo dung lượng") }, onClick = { sortMode = SortMode.SIZE; showSortMenu = false })
+                        DropdownMenuItem(text = { Text("Ảnh") }, onClick = { filter = "img"; showSortMenu = false })
+                        DropdownMenuItem(text = { Text("Video") }, onClick = { filter = "vid"; showSortMenu = false })
+                        DropdownMenuItem(text = { Text("Tất cả loại") }, onClick = { filter = "all"; showSortMenu = false })
+                        DropdownMenuItem(text = { Text(if (sortAsc) "Đảo giảm dần" else "Đảo tăng dần") }, onClick = { sortAsc = !sortAsc; showSortMenu = false })
+                        DropdownMenuItem(text = { Text(if (showHidden) "Ẩn tệp chấm" else "Hiện tệp ẩn") }, onClick = { showHidden = !showHidden; showSortMenu = false })
                     }
                     IconButton(onClick = { refresh() }) {
                         Icon(Icons.Outlined.Refresh, contentDescription = "Làm mới")
                     }
-                    IconButton(onClick = { sortAsc = !sortAsc }) {
-                        Icon(Icons.Outlined.Sort, contentDescription = "Tăng/giảm")
-                    }
-                    IconButton(onClick = { grid = !grid }) {
-                        Icon(Icons.Outlined.Image, contentDescription = "Lưới ảnh")
-                    }
                     IconButton(onClick = { showMore = true }) {
                         Icon(Icons.Outlined.MoreVert, contentDescription = "Thêm")
-                    }
-                    IconButton(onClick = { showSettings = true }) {
-                        Icon(Icons.Outlined.Settings, contentDescription = "Cài đặt")
-                    }
-                    IconButton(onClick = { showGuide = true }) {
-                        Icon(Icons.Outlined.Info, contentDescription = "Hướng dẫn")
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -378,11 +352,6 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
             PathBar(path = currentDir.absolutePath)
             StorageBar(dir = currentDir)
 
-            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("all" to "Tất cả loại", "img" to "Ảnh", "vid" to "Video", "aud" to "Nhạc", "doc" to "Tài liệu", "zip" to "ZIP").forEach { (k,l) ->
-                    FilterChip(selected = filter==k, onClick = { filter = k }, label = { Text(l, style = MaterialTheme.typography.labelSmall) })
-                }
-            }
             ShortcutRow(
                 current = shortcut,
                 onPick = { shortcut = it },
@@ -598,6 +567,8 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                     }) { Text("Cập nhật ứng dụng (GitHub Releases)") }
                     val mail = FmSettings.googleEmail(context)
                     if (mail.isNotBlank()) Text("Google: $mail", style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { showSettings = true; showMore = false }) { Text("Cài đặt") }
+                    TextButton(onClick = { showGuide = true; showMore = false }) { Text("Hướng dẫn") }
                     TextButton(onClick = { showLockSetup = true; showMore = false }) { Text("App lock (PIN)") }
                     TextButton(onClick = {
                         toast(context, JunkCleaner.clean(context)); showMore = false
@@ -803,13 +774,8 @@ private fun SearchRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(end = 4.dp)
                 )
-                IconButton(onClick = { onRecursive(!recursive) }) {
-                    Icon(
-                        imageVector = if (recursive) Icons.Outlined.Visibility else Icons.Outlined.Search,
-                        contentDescription = "Tìm cả cây",
-                        tint = if (recursive) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                TextButton(onClick = { onRecursive(!recursive) }) {
+                    Text(if (recursive) "Cả máy" else "Thư mục", style = MaterialTheme.typography.labelSmall)
                 }
             }
         },
@@ -924,9 +890,10 @@ private fun ServerControlPanel(
                 )
             }
 
-            Spacer(Modifier.height(10.dp))
+            if (running) {
+            Spacer(Modifier.height(8.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -954,6 +921,7 @@ private fun ServerControlPanel(
                 IconButton(onClick = onShowQr) {
                     Icon(Icons.Outlined.QrCode2, contentDescription = "Mã QR")
                 }
+            }
             }
         }
     }

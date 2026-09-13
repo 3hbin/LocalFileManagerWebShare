@@ -152,6 +152,7 @@ class LocalWebServer(
         val current = if (dir.isDirectory) dir else dir.parentFile ?: shareRoot
         val relCurrent = relativePath(current)
         val children = current.listFiles()?.toList().orEmpty()
+            .filter { !it.name.startsWith(".") }
             .sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase(Locale.US) })
         val parentRel = current.parentFile?.takeIf { isInsideRoot(it) }?.let { relativePath(it) }
         if (receiveOnly) {
@@ -187,7 +188,7 @@ class LocalWebServer(
             }
             append("</nav>")
             append("""<section class="card upload drop" id="drop">""")
-            append("""<h2>Tải tệp lên điện thoại — kéo thả vào đây</h2>""")
+            append("""<h2>Tải lên điện thoại</h2>""")
             append("""<form id="up" action="/upload" method="post" enctype="multipart/form-data">""")
             append("""<input type="hidden" name="dir" value="${escape(relCurrent)}" />""")
             append("""<input type="file" name="file" id="file" multiple required />""")
@@ -195,7 +196,7 @@ class LocalWebServer(
             append("""<form action="/zip-selected" method="post"><section class="card"><table>""")
             append("<thead><tr><th></th><th>Tên</th><th>Loại</th>")
             if (!hideSizes) append("<th>Kích thước</th>")
-            append("<th>Sửa đổi</th><th></th></tr></thead><tbody>")
+            append("<th class="when">Sửa đổi</th><th></th></tr></thead><tbody>")
             if (parentRel != null || relCurrent.isNotBlank()) {
                 val href = if (parentRel == null) "/" else browseLink(parentRel)
                 append("""<tr class="dir"><td></td><td colspan="5"><a href="$href">.. (Thư mục cha)</a></td></tr>""")
@@ -214,18 +215,18 @@ class LocalWebServer(
                     append("<td>$type</td>")
                     if (!hideSizes) append("<td>$size</td>")
                     append("<td>$modified</td>")
-                    append("""<td><a class="dl" href="/zip?p=${urlEncode(relChild)}">Tải thư mục</a></td>""")
+                    append("""<td><a class="dl" href="/zip?p=${urlEncode(relChild)}">Tải</a></td>""")
                 } else {
                     append("""<td><span class="name">${escape(name)}</span></td>""")
                     append("<td>$type</td>")
                     if (!hideSizes) append("<td>$size</td>")
                     append("<td>$modified</td>")
-                    append("""<td><a class="dl" href="${downloadLink(relChild)}">Tải xuống</a></td>""")
+                    append("""<td><a class="dl" href="${downloadLink(relChild)}">Tải</a></td>""")
                 }
                 append("</tr>")
             }
             append("</tbody></table>")
-            append("""<p><button type="submit">Tải các mục đã chọn (ZIP)</button></p>""")
+            append("""<p><button type="submit">Tải mục đã chọn</button></p>""")
             append("</section></form>")
             append("""<script>
 const d=document.getElementById('drop');
@@ -416,7 +417,17 @@ a.name.dir { color: var(--brand); text-decoration: none; }
 .empty { color: var(--muted); text-align: center; padding: 24px 0; }
 .drop.on { outline: 2px dashed var(--brand); background: #e8f0ff; }
 footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8px; }
-@media (max-width: 640px) {
-  th:nth-child(3), td:nth-child(3), th:nth-child(4), td:nth-child(4) { display: none; }
+@media (max-width: 720px) {
+  .wrap { margin: 12px auto; padding: 0 10px 32px; }
+  .brand { font-size: 18px; }
+  .sub { font-size: 11px; }
+  .card { padding: 12px; border-radius: 12px; }
+  table { font-size: 13px; }
+  th:nth-child(3), td:nth-child(3),
+  th:nth-child(4), td:nth-child(4),
+  th.when, td:nth-child(5) { display: none; }
+  button, .dl { padding: 6px 10px; font-size: 12px; border-radius: 8px; white-space: nowrap; }
+  td { padding: 8px 4px; vertical-align: middle; }
+  .name { max-width: 58vw; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 """
