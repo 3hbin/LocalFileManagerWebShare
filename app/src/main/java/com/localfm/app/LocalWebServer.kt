@@ -196,7 +196,7 @@ class LocalWebServer(
             append("""<form action="/zip-selected" method="post"><section class="card"><table>""")
             append("<thead><tr><th></th><th>Tên</th><th>Loại</th>")
             if (!hideSizes) append("<th>Kích thước</th>")
-            append("<th class="when">Sửa đổi</th><th></th></tr></thead><tbody>")
+            append("<th class=\"col-date\">Sửa đổi</th><th></th></tr></thead><tbody>")
             if (parentRel != null || relCurrent.isNotBlank()) {
                 val href = if (parentRel == null) "/" else browseLink(parentRel)
                 append("""<tr class="dir"><td></td><td colspan="5"><a href="$href">.. (Thư mục cha)</a></td></tr>""")
@@ -425,7 +425,7 @@ footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8
   table { font-size: 13px; }
   th:nth-child(3), td:nth-child(3),
   th:nth-child(4), td:nth-child(4),
-  th.when, td:nth-child(5) { display: none; }
+  th.col-date, td:nth-child(5) { display: none; }
   button, .dl { padding: 6px 10px; font-size: 12px; border-radius: 8px; white-space: nowrap; }
   td { padding: 8px 4px; vertical-align: middle; }
   .name { max-width: 58vw; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
