@@ -12,8 +12,8 @@ android {
         applicationId = "com.localfm.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.2.3"
+        versionCode = 8
+        versionName = "1.2.5"
     }
 
     signingConfigs {
@@ -73,6 +73,7 @@ dependencies {
     // Tạo mã QR cho địa chỉ Web Share
     implementation("com.google.zxing:core:3.5.3")
     implementation("net.lingala.zip4j:zip4j:2.11.5")
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

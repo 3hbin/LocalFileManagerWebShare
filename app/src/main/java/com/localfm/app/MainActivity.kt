@@ -73,6 +73,15 @@ import androidx.compose.material.icons.outlined.Unarchive
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SystemUpdate
+import androidx.compose.material.icons.outlined.HelpOutline
+import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.RestoreFromTrash
+import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.material.icons.outlined.NoteAdd
+import androidx.compose.material.icons.outlined.CompareArrows
+import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
@@ -202,6 +211,23 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
     var showLockSetup by remember { mutableStateOf(false) }
 
 
+    var googleMail by remember { mutableStateOf(FmSettings.googleEmail(context)) }
+    val googleSignLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        try {
+            val acc = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(res.data).result
+            val email = acc?.email.orEmpty()
+            val name = acc?.displayName.orEmpty()
+            if (email.isNotBlank()) {
+                FmSettings.setGoogleEmail(context, email)
+                googleMail = email
+                toast(context, if (name.isBlank()) "Đã chọn $email" else "Xin chào $name")
+            } else toast(context, "Không lấy được email")
+        } catch (_: Exception) {
+            toast(context, "Đã hủy đăng nhập Google")
+        }
+    }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -560,61 +586,64 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                             style = MaterialTheme.typography.bodySmall)
                     }
                     Text("Thiết bị: ${DeviceInfo.name()}", style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = {
+                    MoreItem(Icons.Outlined.PhoneAndroid, "Thiết bị: ${DeviceInfo.name()}") {}
+                    MoreItem(Icons.Outlined.SystemUpdate, "Cập nhật ứng dụng") {
                         try { AppUpdate.openStore(context) } catch (_: Exception) {
                             toast(context, "Không mở được trang cập nhật")
                         }
-                    }) { Text("Cập nhật ứng dụng (GitHub Releases)") }
-                    val mail = FmSettings.googleEmail(context)
-                    if (mail.isNotBlank()) Text("Google: $mail", style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = { showSettings = true; showMore = false }) { Text("Cài đặt") }
-                    TextButton(onClick = { showGuide = true; showMore = false }) { Text("Hướng dẫn") }
-                    TextButton(onClick = { showLockSetup = true; showMore = false }) { Text("App lock (PIN)") }
-                    TextButton(onClick = {
+                    }
+                    if (googleMail.isNotBlank()) {
+                        MoreItem(Icons.Outlined.AccountCircle, "Google: $googleMail") {}
+                    }
+                    MoreItem(Icons.Outlined.Settings, "Cài đặt") { showSettings = true; showMore = false }
+                    MoreItem(Icons.Outlined.HelpOutline, "Hướng dẫn") { showGuide = true; showMore = false }
+                    MoreItem(Icons.Outlined.Lock, "App lock (PIN)") { showLockSetup = true; showMore = false }
+                    MoreItem(Icons.Outlined.DeleteSweep, "Dọn rác (cache)") {
                         toast(context, JunkCleaner.clean(context)); showMore = false
-                    }) { Text("Dọn rác (cache, không phải diệt virus)") }
-                    TextButton(onClick = { showTrash = true; showMore = false }) { Text("Thùng rác") }
-                    TextButton(onClick = {
+                    }
+                    MoreItem(Icons.Outlined.RestoreFromTrash, "Thùng rác") { showTrash = true; showMore = false }
+                    MoreItem(Icons.Outlined.CloudUpload, "Sao lưu cấu hình + tên máy") {
                         val dir = BackupKit.backupFolder(context)
                         toast(context, "Đã lưu ${dir.absolutePath}")
                         showMore = false
-                    }) { Text("Sao lưu cấu hình + tên thiết bị") }
-                    TextButton(onClick = {
+                    }
+                    MoreItem(Icons.Outlined.AccountCircle, "Đăng nhập Google") {
                         try {
-                            context.startActivity(Intent.createChooser(
-                                android.accounts.AccountManager.newChooseAccountIntent(
-                                    null, null, arrayOf("com.google"), null, null, null, null
-                                ), "Tài khoản Google"
-                            ))
+                            val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
+                                com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
+                            ).requestEmail().requestProfile().build()
+                            val client = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(context, gso)
+                            googleSignLauncher.launch(client.signInIntent)
+                            showMore = false
                         } catch (_: Exception) {
-                            toast(context, "Không mở được tài khoản Google")
+                            toast(context, "Không mở được đăng nhập Google")
                         }
-                    }) { Text("Đăng nhập Google") }
-                    TextButton(onClick = {
+                    }
+                    MoreItem(Icons.Outlined.NoteAdd, "Tạo tệp TXT") {
                         val f = File(currentDir, "ghi_chu_${System.currentTimeMillis()}.txt")
                         f.writeText("")
                         entries = listFilesSafe(currentDir, showHidden)
                         showMore = false
-                    }) { Text("Tạo tệp TXT") }
-                    TextButton(onClick = {
+                    }
+                    MoreItem(Icons.Outlined.DriveFileRenameOutline, "Đổi đuôi thành .bak") {
                         val one = selected.map { File(it) }.firstOrNull()
                         if (one==null || one.isDirectory) toast(context, "Chọn 1 tệp để đổi đuôi")
                         else {
                             val neu = File(one.parentFile, one.nameWithoutExtension + ".bak")
                             if (one.renameTo(neu)) toast(context, "Đã đổi thành ${neu.name}")
                         }
-                    }) { Text("Đổi phần mở rộng thành .bak") }
-                    TextButton(onClick = {
+                    }
+                    MoreItem(Icons.Outlined.QrCode2, "Lưu / xem QR Web Share") {
                         showQr = true; showMore = false
-                    }) { Text("Lưu / xem QR Web Share") }
-                    TextButton(onClick = {
+                    }
+                    MoreItem(Icons.Outlined.CompareArrows, "So sánh 2 tệp đã chọn") {
                         val two = selected.map { File(it) }.take(2)
                         if (two.size < 2) toast(context, "Chọn đúng 2 tệp để so sánh")
                         else {
                             val a = two[0]; val b = two[1]
                             toast(context, "${a.name} ${a.length()}B vs ${b.name} ${b.length()}B")
                         }
-                    }) { Text("So sánh 2 tệp đã chọn") }
+                    }
                 }
             },
             confirmButton = { TextButton(onClick = { showMore = false }) { Text("Đóng") } }
@@ -1356,6 +1385,27 @@ private fun SelectionBar(
         TextButton(onClick = onShare) { Text("Chia sẻ") }
         TextButton(onClick = onDelete) { Text("Xoá") }
         TextButton(onClick = onClear) { Text("Huỷ") }
+    }
+}
+
+
+@Composable
+private fun MoreItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = label, modifier = Modifier.size(22.dp),
+            tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(14.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
