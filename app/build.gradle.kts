@@ -12,13 +12,27 @@ android {
         applicationId = "com.localfm.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.2.2"
+        versionCode = 6
+        versionName = "1.2.3"
+    }
+
+    signingConfigs {
+        create("release") {
+            val rootKs = rootProject.file("release.jks")
+            storeFile = if (rootKs.exists()) rootKs else file("release.jks")
+            storePassword = System.getenv("SIGNING_STORE_PASSWORD") ?: "B4nu25gNrVzwsVSSe-N25bVP"
+            keyAlias = System.getenv("SIGNING_KEY_ALIAS") ?: "release"
+            keyPassword = System.getenv("SIGNING_KEY_PASSWORD") ?: "B4nu25gNrVzwsVSSe-N25bVP"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
