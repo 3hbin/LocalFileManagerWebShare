@@ -194,9 +194,11 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
     var showHidden by rememberSaveable { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var showQr by remember { mutableStateOf(false) }
+    var showMakeQr by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var selecting by remember { mutableStateOf(false) }
     var previewFile by remember { mutableStateOf<File?>(null) }
+    var htmlEdit by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var shortcut by remember { mutableStateOf("all") }
     var recursive by remember { mutableStateOf(false) }
@@ -503,7 +505,7 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                     } else {
                         FmSettings.addRecent(context, file.absolutePath)
                         when {
-                            isImage(file) || isMedia(file) || isText(file) || isPdf(file) -> previewFile = file
+                            isImage(file) || isMedia(file) || isEditable(file) || isHtml(file) || isPdf(file) -> previewFile = file
                             else -> openFile(context, file)
                         }
                     }
@@ -638,6 +640,15 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                     MoreItem(Icons.Outlined.QrCode2, "Lưu / xem QR Web Share") {
                         showQr = true; showMore = false
                     }
+                    MoreItem(Icons.Outlined.QrCode2, "Tạo mã QR") {
+                        showMakeQr = true; showMore = false
+                    }
+                    MoreItem(Icons.Outlined.Android, "Tìm APK đã build") {
+                        val found = findBuiltApks(currentDir)
+                        toast(context, if (found.isEmpty()) "Không thấy APK trong thư mục này (điện thoại không chạy Gradle)" else found.joinToString { it.name })
+                        if (found.isNotEmpty()) currentDir = found.first().parentFile ?: currentDir
+                        showMore = false
+                    }
                     MoreItem(Icons.Outlined.CompareArrows, "So sánh 2 tệp đã chọn") {
                         val two = selected.map { File(it) }.take(2)
                         if (two.size < 2) toast(context, "Chọn đúng 2 tệp để so sánh")
@@ -730,6 +741,13 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
         )
     }
 
+    if (showMakeQr) {
+        MakeQrDialog(
+            initial = selected.firstOrNull() ?: shareUrl ?: currentDir.absolutePath,
+            saveDir = currentDir,
+            onDismiss = { showMakeQr = false }
+        )
+    }
     if (showQr && !shareUrl.isNullOrBlank()) {
         QrShareDialog(
             url = shareUrl.orEmpty(),
@@ -739,9 +757,11 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
 
     previewFile?.let { f ->
         when {
+            isHtml(f) && htmlEdit -> CodeEditorDialog(f) { htmlEdit = false }
+            isHtml(f) -> HtmlPreviewDialog(f, onDismiss = { previewFile = null; htmlEdit = false }, onEdit = { htmlEdit = true })
             isImage(f) -> ImagePreviewDialog(f) { previewFile = null }
             isMedia(f) -> MediaPreviewDialog(f) { previewFile = null }
-            isText(f) -> TextPreviewDialog(f) { previewFile = null }
+            isEditable(f) -> CodeEditorDialog(f) { previewFile = null }
             isPdf(f) -> PdfPreviewDialog(f) { previewFile = null }
             else -> previewFile = null
         }
