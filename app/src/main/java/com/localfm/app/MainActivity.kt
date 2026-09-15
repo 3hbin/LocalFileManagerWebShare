@@ -508,6 +508,7 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                         FmSettings.addRecent(context, file.absolutePath)
                         when {
                             isHtml(file) -> openHtmlInBrowser(context, file)
+                            file.extension.lowercase() == "zip" -> previewFile = file
                             isImage(file) || isMedia(file) || isEditable(file) || isPdf(file) -> previewFile = file
                             else -> openFile(context, file)
                         }
@@ -772,6 +773,7 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
         when {
             isHtml(f) && htmlEdit -> CodeEditorDialog(f) { htmlEdit = false }
             isHtml(f) -> HtmlPreviewDialog(f, onDismiss = { previewFile = null; htmlEdit = false }, onEdit = { htmlEdit = true })
+            f.extension.lowercase() == "zip" -> ZipPeekDialog(f) { previewFile = null }
             isImage(f) -> ImagePreviewDialog(f) { previewFile = null }
             isMedia(f) -> MediaPreviewDialog(f) { previewFile = null }
             isEditable(f) -> CodeEditorDialog(f) { previewFile = null }

@@ -257,3 +257,29 @@ fun CreateFileDialog(dir: File, onDismiss: () -> Unit, onCreated: () -> Unit) {
         dismissButton = { TextButton(onClick = onDismiss) { Text("Hủy") } }
     )
 }
+
+private val HIDDEN_IN_ZIP = setOf("png","jpg","jpeg","gif","webp","bmp","heic","svg")
+
+@Composable
+fun ZipPeekDialog(file: File, onDismiss: () -> Unit) {
+    val items = remember(file.absolutePath) { ZipUtils.listEntries(file) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Trong ${file.name}") },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                if (items.isEmpty()) Text("ZIP trống hoặc không đọc được")
+                items.forEach { item ->
+                    val ext = item.name.substringAfterLast('.', "").lowercase()
+                    val hidden = ext in HIDDEN_IN_ZIP
+                    Text(
+                        if (item.isDir) "[Thư mục] ${item.name}"
+                        else if (hidden) "${item.name}  — ảnh đã ẩn"
+                        else "${item.name}  (${item.size} B)"
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
+    )
+}

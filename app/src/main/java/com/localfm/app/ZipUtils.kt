@@ -9,6 +9,20 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 object ZipUtils {
+    data class ZipItem(val name: String, val size: Long, val isDir: Boolean)
+
+    fun listEntries(zipFile: File, limit: Int = 400): List<ZipItem> {
+        if (!zipFile.exists()) return emptyList()
+        return try {
+            java.util.zip.ZipFile(zipFile).use { z ->
+                z.entries().toList().take(limit).map {
+                    ZipItem(it.name, it.size, it.isDirectory)
+                }
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+
     fun emptyZip(destZip: File): Boolean {
         return try {
             ZipOutputStream(FileOutputStream(destZip)).use { zos ->
