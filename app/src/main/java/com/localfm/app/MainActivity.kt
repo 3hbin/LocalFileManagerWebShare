@@ -56,6 +56,8 @@ import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.PictureAsPdf
@@ -205,7 +207,7 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
     var htmlEdit by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var shortcut by remember { mutableStateOf("all") }
-    var recursive by remember { mutableStateOf(false) }
+    var recursive by remember { mutableStateOf(true) }
     var webPass by remember { mutableStateOf(FmSettings.webPassword(context)) }
     var hideSizes by remember { mutableStateOf(FmSettings.hideSizes(context)) }
     var showMore by remember { mutableStateOf(false) }
@@ -220,11 +222,17 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
 
 
     var googleMail by remember { mutableStateOf(FmSettings.googleEmail(context)) }
+    LaunchedEffect(Unit) { TrashBin.purgeOld(context, 30) }
     val googleSignLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { res ->
-        try {
-            val acc = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(res.data).result
+        if (res.resultCode != android.app.Activity.RESULT_OK) {
+            toast(context, "Đã hủy đăng nhập Google")
+            return@rememberLauncherForActivityResult
+        }
+        val task = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(res.data)
+        if (task.isSuccessful) {
+            val acc = task.result
             val email = acc?.email.orEmpty()
             val name = acc?.displayName.orEmpty()
             if (email.isNotBlank()) {
@@ -232,8 +240,9 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                 googleMail = email
                 toast(context, if (name.isBlank()) "Đã chọn $email" else "Xin chào $name")
             } else toast(context, "Không lấy được email")
-        } catch (_: Exception) {
-            toast(context, "Đã hủy đăng nhập Google")
+        } else {
+            val code = (task.exception as? com.google.android.gms.common.api.ApiException)?.statusCode
+            toast(context, "Đăng nhập Google lỗi" + if (code != null) " (mã $code)" else "")
         }
     }
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -489,6 +498,10 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                     },
                     onShare = {
                         shareFiles(context, selected.map { File(it) }.filter { it.isFile })
+                    },
+                    onSelectAll = {
+                        selected = visibleFiles.map { it.absolutePath }.toSet()
+                        selecting = true
                     }
                 )
             }
@@ -604,6 +617,9 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                     if (googleMail.isNotBlank()) {
                         MoreItem(Icons.Outlined.AccountCircle, "Google: $googleMail") {}
                     }
+                    MoreItem(Icons.Outlined.Folder, "Về bộ nhớ trong") {
+                        currentDir = storageRoot; showMore = false
+                    }
                     MoreItem(Icons.Outlined.Settings, "Cài đặt") { showSettings = true; showMore = false }
                     MoreItem(Icons.Outlined.HelpOutline, "Hướng dẫn") { showGuide = true; showMore = false }
                     MoreItem(Icons.Outlined.Lock, "App lock (PIN)") { showLockSetup = true; showMore = false }
@@ -692,7 +708,7 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
         val items = TrashBin.list(context)
         AlertDialog(
             onDismissRequest = { showTrash = false },
-            title = { Text("Thùng rác") },
+            title = { Text("Thùng rác (xoá sau 30 ngày)") },
             text = {
                 Column {
                     if (items.isEmpty()) Text("Trống")
@@ -1179,6 +1195,33 @@ private fun FileRow(
                 leadingIcon = { Icon(Icons.Outlined.Star, contentDescription = null) }
             )
             DropdownMenuItem(
+                text = { Text("Sao chép đường dẫn") },
+                onClick = {
+                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("path", file.absolutePath))
+                    android.widget.Toast.makeText(ctx, file.absolutePath, android.widget.Toast.LENGTH_SHORT).show()
+                    onDismissMenu()
+                },
+                leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null) }
+            )
+            DropdownMenuItem(
+                text = { Text("Mở bằng ứng dụng khác") },
+                onClick = {
+                    try {
+                        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".fileprovider", file)
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                            setDataAndType(uri, "*/*")
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        ctx.startActivity(android.content.Intent.createChooser(intent, "Mở bằng"))
+                    } catch (_: Exception) {
+                        android.widget.Toast.makeText(ctx, "Không mở được", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    onDismissMenu()
+                },
+                leadingIcon = { Icon(Icons.Outlined.OpenInNew, contentDescription = null) }
+            )
+            DropdownMenuItem(
                 text = { Text("Chia sẻ") },
                 onClick = {
                     shareFiles(ctx, listOf(file))
@@ -1417,7 +1460,8 @@ private fun SelectionBar(
     onCut: () -> Unit,
     onPaste: () -> Unit,
     onZip: () -> Unit,
-    onShare: () -> Unit
+    onShare: () -> Unit,
+    onSelectAll: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -1426,6 +1470,7 @@ private fun SelectionBar(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text("$count đã chọn", modifier = Modifier.padding(end = 8.dp))
+        TextButton(onClick = onSelectAll) { Text("Chọn hết") }
         TextButton(onClick = onCopy) { Text("Copy") }
         TextButton(onClick = onCut) { Text("Cắt") }
         if (hasClip) TextButton(onClick = onPaste) { Text("Dán") }

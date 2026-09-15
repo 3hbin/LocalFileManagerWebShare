@@ -65,7 +65,7 @@ object TrashBin {
         return try { trashFile.renameTo(dest) } catch (_: Exception) { false }
     }
 
-    fun purgeOld(ctx: Context, days: Int = 7): Int {
+    fun purgeOld(ctx: Context, days: Int = 30): Int {
         val cut = System.currentTimeMillis() - days * 24L * 3600_000
         var n = 0
         list(ctx).forEach {
@@ -108,7 +108,7 @@ object JunkCleaner {
         ctx.codeCacheDir.listFiles()?.forEach { eat(it) }
         ctx.externalCacheDir?.listFiles()?.forEach { eat(it) }
         File(ctx.cacheDir, "tmp").deleteRecursively()
-        val purged = TrashBin.purgeOld(ctx, 7)
+        val purged = TrashBin.purgeOld(ctx, 30)
         return "Đã dọn $files mục cache, ${bytes / 1024} KB, thùng rác cũ $purged. Đây không phải diệt virus."
     }
 }

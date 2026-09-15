@@ -12,8 +12,8 @@ android {
         applicationId = "com.localfm.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 20
-        versionName = "1.3.6"
+        versionCode = 22
+        versionName = "1.3.8"
     }
 
     signingConfigs {
