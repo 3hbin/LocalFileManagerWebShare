@@ -22,7 +22,12 @@ object DriveSync {
         GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
             .requestProfile()
-            .requestIdToken(WEB_CLIENT)
+            .build()
+
+    fun signInOptionsDrive(): GoogleSignInOptions =
+        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestProfile()
             .requestScopes(Scope(SCOPE))
             .build()
 

@@ -82,6 +82,7 @@ import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.RestoreFromTrash
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.NoteAdd
 import androidx.compose.material.icons.outlined.CompareArrows
@@ -220,6 +221,7 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
     var sortAsc by remember { mutableStateOf(true) }
     var showTrash by remember { mutableStateOf(false) }
     var showDriveRestore by remember { mutableStateOf(false) }
+    var showManualEmail by remember { mutableStateOf(false) }
     var showLockSetup by remember { mutableStateOf(false) }
 
 
@@ -229,7 +231,7 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
         ActivityResultContracts.StartActivityForResult()
     ) { res ->
         if (res.resultCode != android.app.Activity.RESULT_OK) {
-            toast(context, "Đã hủy đăng nhập Google")
+            toast(context, "Google trả về mã ${res.resultCode} (0 = hủy / thiếu SHA-1)")
             return@rememberLauncherForActivityResult
         }
         val task = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(res.data)
@@ -643,6 +645,9 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                     MoreItem(Icons.Outlined.CloudDownload, "Khôi phục từ Google Drive") {
                         showDriveRestore = true; showMore = false
                     }
+                    MoreItem(Icons.Outlined.Email, "Nhập email thủ công") {
+                        showManualEmail = true; showMore = false
+                    }
                     MoreItem(Icons.Outlined.AccountCircle, "Đăng nhập Google") {
                         try {
                             val gso = DriveSync.signInOptions()
@@ -713,6 +718,18 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
         )
     }
 
+    if (showManualEmail) {
+        ManualEmailDialog(
+            initial = googleMail,
+            onDismiss = { showManualEmail = false },
+            onSave = { mail ->
+                FmSettings.setGoogleEmail(context, mail)
+                googleMail = mail
+                showManualEmail = false
+                toast(context, "Đã lưu $mail")
+            }
+        )
+    }
     if (showDriveRestore) {
         DriveRestoreDialog(onDismiss = { showDriveRestore = false })
     }

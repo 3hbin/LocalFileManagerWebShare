@@ -351,3 +351,25 @@ fun DriveRestoreDialog(onDismiss: () -> Unit) {
         confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
     )
 }
+
+@Composable
+fun ManualEmailDialog(initial: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var mail by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Email Google") },
+        text = {
+            OutlinedTextField(
+                value = mail,
+                onValueChange = { mail = it },
+                label = { Text("Gmail") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(mail.trim()) }) { Text("Lưu") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Hủy") } }
+    )
+}
