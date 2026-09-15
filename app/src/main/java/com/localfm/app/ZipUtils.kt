@@ -11,13 +11,20 @@ import java.util.zip.ZipOutputStream
 object ZipUtils {
     data class ZipItem(val name: String, val size: Long, val isDir: Boolean)
 
-    fun listEntries(zipFile: File, limit: Int = 400): List<ZipItem> {
+    fun isEncrypted(zipFile: File): Boolean {
+        return try { net.lingala.zip4j.ZipFile(zipFile).isEncrypted } catch (_: Exception) { false }
+    }
+
+    fun listEntries(zipFile: File, password: String? = null, limit: Int = 400): List<ZipItem> {
         if (!zipFile.exists()) return emptyList()
         return try {
-            java.util.zip.ZipFile(zipFile).use { z ->
-                z.entries().toList().take(limit).map {
-                    ZipItem(it.name, it.size, it.isDirectory)
-                }
+            val z = net.lingala.zip4j.ZipFile(zipFile)
+            if (z.isEncrypted) {
+                if (password.isNullOrBlank()) return emptyList()
+                z.setPassword(password.toCharArray())
+            }
+            z.fileHeaders.take(limit).map {
+                ZipItem(it.fileName ?: "", it.uncompressedSize, it.isDirectory)
             }
         } catch (_: Exception) { emptyList() }
     }
@@ -65,7 +72,7 @@ object ZipUtils {
         }
     }
 
-    fun unzip(zipFile: File, destDir: File): String? {
+    fun unzip(zipFile: File, destDir: File, password: String? = null): String? {
         if (!zipFile.exists()) return "Không tìm thấy tệp"
         val name = zipFile.name.lowercase()
         if (name.endsWith(".rar") || name.endsWith(".7z") || name.endsWith(".rar5")) {
@@ -73,25 +80,16 @@ object ZipUtils {
         }
         return try {
             destDir.mkdirs()
-            ZipInputStream(BufferedInputStream(FileInputStream(zipFile))).use { zis ->
-                var entry = zis.nextEntry
-                while (entry != null) {
-                    val out = File(destDir, entry.name).canonicalFile
-                    if (!out.path.startsWith(destDir.canonicalPath)) {
-                        return "ZIP không hợp lệ"
-                    }
-                    if (entry.isDirectory) out.mkdirs()
-                    else {
-                        out.parentFile?.mkdirs()
-                        FileOutputStream(out).use { zis.copyTo(it) }
-                    }
-                    zis.closeEntry()
-                    entry = zis.nextEntry
-                }
+            val z = net.lingala.zip4j.ZipFile(zipFile)
+            if (z.isEncrypted) {
+                if (password.isNullOrBlank()) return "ZIP_PASSWORD"
+                z.setPassword(password.toCharArray())
             }
+            z.extractAll(destDir.absolutePath)
             null
         } catch (e: Exception) {
-            e.message ?: "Giải nén thất bại"
+            val m = e.message ?: "Giải nén thất bại"
+            if (m.contains("password", true) || m.contains("encrypted", true)) "ZIP_PASSWORD" else m
         }
     }
 

@@ -262,13 +262,31 @@ private val HIDDEN_IN_ZIP = setOf("png","jpg","jpeg","gif","webp","bmp","heic","
 
 @Composable
 fun ZipPeekDialog(file: File, onDismiss: () -> Unit) {
-    val items = remember(file.absolutePath) { ZipUtils.listEntries(file) }
+    val ctx = LocalContext.current
+    var password by remember { mutableStateOf("") }
+    var items by remember { mutableStateOf(ZipUtils.listEntries(file)) }
+    val encrypted = remember(file.absolutePath) { ZipUtils.isEncrypted(file) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Trong ${file.name}") },
         text = {
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                if (items.isEmpty()) Text("ZIP trống hoặc không đọc được")
+                if (encrypted) {
+                    Text("ZIP có mật khẩu")
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("Mật khẩu") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    TextButton(onClick = {
+                        items = ZipUtils.listEntries(file, password)
+                    }) { Text("Mở khóa") }
+                }
+                if (items.isEmpty()) {
+                    Text(if (encrypted) "Nhập mật khẩu để xem danh sách (ảnh vẫn ẩn)" else "ZIP trống hoặc không đọc được")
+                }
                 items.forEach { item ->
                     val ext = item.name.substringAfterLast('.', "").lowercase()
                     val hidden = ext in HIDDEN_IN_ZIP
@@ -280,6 +298,19 @@ fun ZipPeekDialog(file: File, onDismiss: () -> Unit) {
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
+        confirmButton = {
+            TextButton(onClick = {
+                val dest = File(file.parentFile, file.nameWithoutExtension)
+                val err = ZipUtils.unzip(file, dest, password.ifBlank { null })
+                val msg = when (err) {
+                    "ZIP_PASSWORD" -> "Sai hoặc thiếu mật khẩu"
+                    null -> "Đã giải nén vào ${dest.name}"
+                    else -> err
+                }
+                Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+                if (err == null) onDismiss()
+            }) { Text("Giải nén") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
     )
 }

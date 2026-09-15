@@ -197,6 +197,8 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
     var showQr by remember { mutableStateOf(false) }
     var showMakeQr by remember { mutableStateOf(false) }
     var showCreateFile by remember { mutableStateOf(false) }
+    var pendingUnzip by remember { mutableStateOf<File?>(null) }
+    var unzipPass by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var selecting by remember { mutableStateOf(false) }
     var previewFile by remember { mutableStateOf<File?>(null) }
@@ -1199,7 +1201,12 @@ private fun FileRow(
                 onClick = {
                     val dest = File(file.parentFile, file.nameWithoutExtension)
                     val err = ZipUtils.unzip(file, dest)
-                    android.widget.Toast.makeText(ctx, err ?: "Đã giải nén", android.widget.Toast.LENGTH_SHORT).show()
+                    val msg = when (err) {
+                        "ZIP_PASSWORD" -> "ZIP có mật khẩu — bấm vào file ZIP rồi nhập mật khẩu"
+                        null -> "Đã giải nén"
+                        else -> err
+                    }
+                    android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_SHORT).show()
                     onDismissMenu()
                 },
                 leadingIcon = { Icon(Icons.Outlined.Unarchive, contentDescription = null) }
