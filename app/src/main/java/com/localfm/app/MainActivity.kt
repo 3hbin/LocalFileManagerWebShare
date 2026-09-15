@@ -81,6 +81,7 @@ import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.RestoreFromTrash
 import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.NoteAdd
 import androidx.compose.material.icons.outlined.CompareArrows
@@ -218,6 +219,7 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
     var grid by remember { mutableStateOf(false) }
     var sortAsc by remember { mutableStateOf(true) }
     var showTrash by remember { mutableStateOf(false) }
+    var showDriveRestore by remember { mutableStateOf(false) }
     var showLockSetup by remember { mutableStateOf(false) }
 
 
@@ -628,17 +630,22 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                     }
                     MoreItem(Icons.Outlined.RestoreFromTrash, "Thùng rác") { showTrash = true; showMore = false }
                     MoreItem(Icons.Outlined.CloudUpload, "Sao lưu cấu hình + tên máy") {
+                        Thread {
+                            val msg = DriveSync.uploadBackup(context)
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                toast(context, msg)
+                            }
+                        }.start()
                         val dir = BackupKit.backupFolder(context)
                         toast(context, "Đã lưu ${dir.absolutePath}")
                         showMore = false
                     }
+                    MoreItem(Icons.Outlined.CloudDownload, "Khôi phục từ Google Drive") {
+                        showDriveRestore = true; showMore = false
+                    }
                     MoreItem(Icons.Outlined.AccountCircle, "Đăng nhập Google") {
                         try {
-                            val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
-                                com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
-                            ).requestEmail().requestProfile()
-                                .requestIdToken("29785662413-tfo1tvk34t3702h35912totb02vssjo2.apps.googleusercontent.com")
-                                .build()
+                            val gso = DriveSync.signInOptions()
                             val client = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(context, gso)
                             googleSignLauncher.launch(client.signInIntent)
                             showMore = false
@@ -706,6 +713,9 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
         )
     }
 
+    if (showDriveRestore) {
+        DriveRestoreDialog(onDismiss = { showDriveRestore = false })
+    }
     if (showTrash) {
         val items = TrashBin.list(context)
         AlertDialog(

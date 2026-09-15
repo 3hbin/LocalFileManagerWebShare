@@ -122,6 +122,7 @@ object BackupKit {
         o.put("recents", JSONArray(FmSettings.recents(ctx)))
         o.put("hide_sizes", FmSettings.hideSizes(ctx))
         o.put("web_pass_set", FmSettings.webPassword(ctx).isNotBlank())
+        o.put("google_email", FmSettings.googleEmail(ctx))
         return o.toString(2)
     }
 
@@ -135,6 +136,8 @@ object BackupKit {
                     FmSettings.toggleFavorite(ctx, path)
                 }
             }
+            val mail = o.optString("google_email")
+            if (mail.isNotBlank()) FmSettings.setGoogleEmail(ctx, mail)
             true
         } catch (_: Exception) { false }
     }

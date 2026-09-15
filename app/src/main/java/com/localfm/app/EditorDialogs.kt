@@ -314,3 +314,40 @@ fun ZipPeekDialog(file: File, onDismiss: () -> Unit) {
         dismissButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
     )
 }
+
+@Composable
+fun DriveRestoreDialog(onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    var items by remember { mutableStateOf(listOf<DriveSync.Remote>()) }
+    var msg by remember { mutableStateOf("Đang lấy danh sách…") }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        Thread {
+            val list = DriveSync.listBackups(ctx)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                items = list
+                msg = if (list.isEmpty()) "Chưa có bản sao lưu trên Drive (đăng nhập Google trước)" else "Chọn máy để khôi phục"
+            }
+        }.start()
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Khôi phục từ Drive") },
+        text = {
+            Column {
+                Text(msg)
+                items.forEach { r ->
+                    TextButton(onClick = {
+                        Thread {
+                            val out = DriveSync.restore(ctx, r.id)
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                Toast.makeText(ctx, out, Toast.LENGTH_SHORT).show()
+                                onDismiss()
+                            }
+                        }.start()
+                    }) { Text(r.name) }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
+    )
+}
