@@ -85,6 +85,7 @@ import androidx.compose.material.icons.outlined.CompareArrows
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -581,7 +582,7 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
             onDismissRequest = { showMore = false },
             title = { Text("Thêm") },
             text = {
-                Column {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text("Phiên bản v${AppUpdate.installed(context)}")
                     val remote = latestTag
                     if (!remote.isNullOrBlank()) {
@@ -590,7 +591,6 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                             style = MaterialTheme.typography.bodySmall)
                     }
                     Text("Thiết bị: ${DeviceInfo.name()}", style = MaterialTheme.typography.bodySmall)
-                    MoreItem(Icons.Outlined.PhoneAndroid, "Thiết bị: ${DeviceInfo.name()}") {}
                     MoreItem(Icons.Outlined.SystemUpdate, "Cập nhật ứng dụng") {
                         try { AppUpdate.openStore(context) } catch (_: Exception) {
                             toast(context, "Không mở được trang cập nhật")

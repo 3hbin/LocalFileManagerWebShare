@@ -10,10 +10,14 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -81,38 +85,49 @@ fun HtmlPreviewDialog(file: File, onDismiss: () -> Unit, onEdit: () -> Unit) {
     val ctx = LocalContext.current
     var web by remember { mutableStateOf<WebView?>(null) }
     val url = remember(file.absolutePath) { "file://${file.absolutePath}" }
-    AlertDialog(
+    androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
-        title = { Text(file.name) },
-        text = {
-            Column {
-                Row {
-                    TextButton(onClick = {
-                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("link", url))
-                        Toast.makeText(ctx, "Đã copy $url", Toast.LENGTH_SHORT).show()
-                    }) { Text("Copy link") }
-                    TextButton(onClick = { web?.reload() }) { Text("Tải lại") }
-                    TextButton(onClick = onEdit) { Text("Sửa mã") }
-                }
-                AndroidView(
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp, max = 420.dp),
-                    factory = { c ->
-                        WebView(c).apply {
-                            settings.javaScriptEnabled = true
-                            settings.allowFileAccess = true
-                            settings.domStorageEnabled = true
-                            webViewClient = WebViewClient()
-                            loadUrl(url)
-                            web = this
-                        }
-                    },
-                    update = { if (it.url != url) it.loadUrl(url) }
-                )
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .padding(8.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text(file.name, modifier = Modifier.weight(1f), maxLines = 1)
+                TextButton(onClick = {
+                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("link", url))
+                    Toast.makeText(ctx, "Đã copy $url", Toast.LENGTH_SHORT).show()
+                }) { Text("Copy") }
+                TextButton(onClick = { web?.reload() }) { Text("Tải lại") }
+                TextButton(onClick = onEdit) { Text("Sửa") }
+                TextButton(onClick = onDismiss) { Text("Đóng") }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
-    )
+            AndroidView(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                factory = { c ->
+                    WebView(c).apply {
+                        settings.javaScriptEnabled = true
+                        settings.allowFileAccess = true
+                        settings.domStorageEnabled = true
+                        settings.useWideViewPort = true
+                        settings.loadWithOverviewMode = true
+                        settings.builtInZoomControls = true
+                        settings.displayZoomControls = false
+                        webViewClient = WebViewClient()
+                        loadUrl(url)
+                        web = this
+                    }
+                },
+                update = { if (it.url != url) it.loadUrl(url) }
+            )
+        }
+        }
+    }
 }
 
 fun findBuiltApks(dir: File): List<File> {
