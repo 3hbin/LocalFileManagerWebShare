@@ -9,6 +9,20 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 object ZipUtils {
+    fun emptyZip(destZip: File): Boolean {
+        return try {
+            ZipOutputStream(FileOutputStream(destZip)).use { zos ->
+                zos.putNextEntry(ZipEntry("README.txt"))
+                zos.write("ZIP tao bang Quan ly tep\n".toByteArray())
+                zos.closeEntry()
+            }
+            destZip.exists()
+        } catch (_: Exception) {
+            destZip.delete()
+            false
+        }
+    }
+
     fun zipTo(sources: List<File>, destZip: File): Boolean {
         return try {
             ZipOutputStream(FileOutputStream(destZip)).use { zos ->

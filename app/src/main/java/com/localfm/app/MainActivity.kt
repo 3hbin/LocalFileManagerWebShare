@@ -196,6 +196,7 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
     var showSortMenu by remember { mutableStateOf(false) }
     var showQr by remember { mutableStateOf(false) }
     var showMakeQr by remember { mutableStateOf(false) }
+    var showCreateFile by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var selecting by remember { mutableStateOf(false) }
     var previewFile by remember { mutableStateOf<File?>(null) }
@@ -506,7 +507,8 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                     } else {
                         FmSettings.addRecent(context, file.absolutePath)
                         when {
-                            isImage(file) || isMedia(file) || isEditable(file) || isHtml(file) || isPdf(file) -> previewFile = file
+                            isHtml(file) -> openHtmlInBrowser(context, file)
+                            isImage(file) || isMedia(file) || isEditable(file) || isPdf(file) -> previewFile = file
                             else -> openFile(context, file)
                         }
                     }
@@ -623,9 +625,14 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                             toast(context, "Không mở được đăng nhập Google")
                         }
                     }
-                    MoreItem(Icons.Outlined.NoteAdd, "Tạo tệp TXT") {
-                        val f = File(currentDir, "ghi_chu_${System.currentTimeMillis()}.txt")
-                        f.writeText("")
+                    MoreItem(Icons.Outlined.NoteAdd, "Tạo tệp theo đuôi") {
+                        showCreateFile = true; showMore = false
+                    }
+                    MoreItem(Icons.Outlined.Archive, "Tạo file ZIP") {
+                        val dest = File(currentDir, "moi_${System.currentTimeMillis()}.zip")
+                        val src = selected.map { File(it) }.ifEmpty { emptyList() }
+                        val ok = if (src.isEmpty()) ZipUtils.emptyZip(dest) else ZipUtils.zipTo(src, dest)
+                        toast(context, if (ok) "Đã tạo ${dest.name}" else "Không tạo được ZIP")
                         entries = listFilesSafe(currentDir, showHidden)
                         showMore = false
                     }
@@ -741,6 +748,12 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
         )
     }
 
+    if (showCreateFile) {
+        CreateFileDialog(dir = currentDir, onDismiss = { showCreateFile = false }, onCreated = {
+            entries = listFilesSafe(currentDir, showHidden)
+            showCreateFile = false
+        })
+    }
     if (showMakeQr) {
         MakeQrDialog(
             initial = selected.firstOrNull() ?: shareUrl ?: currentDir.absolutePath,

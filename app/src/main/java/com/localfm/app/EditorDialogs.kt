@@ -10,14 +10,10 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -85,49 +81,38 @@ fun HtmlPreviewDialog(file: File, onDismiss: () -> Unit, onEdit: () -> Unit) {
     val ctx = LocalContext.current
     var web by remember { mutableStateOf<WebView?>(null) }
     val url = remember(file.absolutePath) { "file://${file.absolutePath}" }
-    androidx.compose.ui.window.Dialog(
+    AlertDialog(
         onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(color = MaterialTheme.colorScheme.background) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .fillMaxHeight()
-                .padding(8.dp)
-        ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Text(file.name, modifier = Modifier.weight(1f), maxLines = 1)
-                TextButton(onClick = {
-                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    cm.setPrimaryClip(ClipData.newPlainText("link", url))
-                    Toast.makeText(ctx, "Đã copy $url", Toast.LENGTH_SHORT).show()
-                }) { Text("Copy") }
-                TextButton(onClick = { web?.reload() }) { Text("Tải lại") }
-                TextButton(onClick = onEdit) { Text("Sửa") }
-                TextButton(onClick = onDismiss) { Text("Đóng") }
+        title = { Text(file.name) },
+        text = {
+            Column {
+                Row {
+                    TextButton(onClick = {
+                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("link", url))
+                        Toast.makeText(ctx, "Đã copy $url", Toast.LENGTH_SHORT).show()
+                    }) { Text("Copy link") }
+                    TextButton(onClick = { web?.reload() }) { Text("Tải lại") }
+                    TextButton(onClick = onEdit) { Text("Sửa mã") }
+                }
+                AndroidView(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp, max = 420.dp),
+                    factory = { c ->
+                        WebView(c).apply {
+                            settings.javaScriptEnabled = true
+                            settings.allowFileAccess = true
+                            settings.domStorageEnabled = true
+                            webViewClient = WebViewClient()
+                            loadUrl(url)
+                            web = this
+                        }
+                    },
+                    update = { if (it.url != url) it.loadUrl(url) }
+                )
             }
-            AndroidView(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                factory = { c ->
-                    WebView(c).apply {
-                        settings.javaScriptEnabled = true
-                        settings.allowFileAccess = true
-                        settings.domStorageEnabled = true
-                        settings.useWideViewPort = true
-                        settings.loadWithOverviewMode = true
-                        settings.builtInZoomControls = true
-                        settings.displayZoomControls = false
-                        webViewClient = WebViewClient()
-                        loadUrl(url)
-                        web = this
-                    }
-                },
-                update = { if (it.url != url) it.loadUrl(url) }
-            )
-        }
-        }
-    }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
+    )
 }
 
 fun findBuiltApks(dir: File): List<File> {
@@ -188,5 +173,87 @@ fun MakeQrDialog(initial: String, saveDir: File, onDismiss: () -> Unit) {
             }) { Text("Lưu PNG") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
+    )
+}
+
+fun openHtmlInBrowser(context: Context, file: File) {
+    val uri = try {
+        androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", file
+        )
+    } catch (_: Exception) {
+        android.net.Uri.fromFile(file)
+    }
+    val view = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, "text/html")
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    val launched = listOf("com.android.chrome", "com.google.android.apps.chrome", "com.chrome.beta")
+        .any { pkg ->
+            try {
+                context.startActivity(android.content.Intent(view).setPackage(pkg))
+                true
+            } catch (_: Exception) { false }
+        }
+    if (!launched) {
+        try {
+            context.startActivity(android.content.Intent.createChooser(view, "Mở HTML"))
+        } catch (_: Exception) {
+            Toast.makeText(context, "Không mở được trình duyệt", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
+
+@Composable
+fun CreateFileDialog(dir: File, onDismiss: () -> Unit, onCreated: () -> Unit) {
+    val ctx = LocalContext.current
+    val exts = listOf("txt", "html", "js", "kt", "json", "xml", "css", "md", "zip")
+    var name by remember { mutableStateOf("tep_moi") }
+    var ext by remember { mutableStateOf("txt") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Tạo tệp") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.filter { ch -> ch != '/' && ch != '\\' } },
+                    label = { Text("Tên tệp") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text("Đuôi: .$ext")
+                Row(Modifier.fillMaxWidth()) {
+                    exts.forEach { e ->
+                        TextButton(onClick = { ext = e }) { Text(if (ext == e) "[$e]" else e) }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val base = name.trim().ifBlank { "tep_moi" }
+                val f = File(dir, "$base.$ext")
+                if (f.exists()) {
+                    Toast.makeText(ctx, "Đã có ${f.name}", Toast.LENGTH_SHORT).show()
+                    return@TextButton
+                }
+                val ok = try {
+                    if (ext == "zip") ZipUtils.emptyZip(f)
+                    else {
+                        f.writeText(
+                            if (ext == "html")
+                                "<!DOCTYPE html><html><body><h1>$base</h1></body></html>\n"
+                            else ""
+                        )
+                        true
+                    }
+                } catch (_: Exception) { false }
+                Toast.makeText(ctx, if (ok) "Đã tạo ${f.name}" else "Lỗi tạo tệp", Toast.LENGTH_SHORT).show()
+                if (ok) onCreated() else onDismiss()
+            }) { Text("Tạo") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Hủy") } }
     )
 }
