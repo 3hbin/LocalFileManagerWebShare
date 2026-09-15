@@ -636,7 +636,9 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                         try {
                             val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
                                 com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
-                            ).requestEmail().requestProfile().build()
+                            ).requestEmail().requestProfile()
+                                .requestIdToken("29785662413-tfo1tvk34t3702h35912totb02vssjo2.apps.googleusercontent.com")
+                                .build()
                             val client = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(context, gso)
                             googleSignLauncher.launch(client.signInIntent)
                             showMore = false

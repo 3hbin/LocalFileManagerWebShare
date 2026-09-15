@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -12,8 +13,8 @@ android {
         applicationId = "com.localfm.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 22
-        versionName = "1.3.8"
+        versionCode = 23
+        versionName = "1.3.9"
     }
 
     signingConfigs {
@@ -74,6 +75,7 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
     implementation("net.lingala.zip4j:zip4j:2.11.5")
     implementation("com.google.android.gms:play-services-auth:21.2.0")
+    implementation("com.google.firebase:firebase-auth:23.0.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
