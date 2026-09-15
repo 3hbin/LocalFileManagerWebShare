@@ -20,8 +20,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # Không cài gói "tools" (SDK cũ đã bị Google gỡ → CI fail)
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Grant execute permission for Gradle Wrapper
         run: chmod +x gradlew
