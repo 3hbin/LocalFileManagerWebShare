@@ -149,6 +149,12 @@ object BackupKit {
         File(dir, "settings.json").writeText(exportJson(ctx))
         return dir
     }
+
+    fun listLocal(): List<File> {
+        val root = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "LocalFM_Backup")
+        if (!root.exists()) return emptyList()
+        return root.walkTopDown().filter { it.isFile && it.name == "settings.json" }.toList()
+    }
 }
 
 object ThumbCache {

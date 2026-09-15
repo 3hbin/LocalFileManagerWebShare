@@ -319,21 +319,29 @@ fun ZipPeekDialog(file: File, onDismiss: () -> Unit) {
 fun DriveRestoreDialog(onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     var items by remember { mutableStateOf(listOf<DriveSync.Remote>()) }
+    var local by remember { mutableStateOf(listOf<java.io.File>()) }
     var msg by remember { mutableStateOf("Đang lấy danh sách…") }
     androidx.compose.runtime.LaunchedEffect(Unit) {
         Thread {
-            val list = DriveSync.listBackups(ctx)
+            val acc = com.google.android.gms.auth.api.signin.GoogleSignIn.getLastSignedInAccount(ctx)
+            val list = if (acc != null) DriveSync.listBackups(ctx) else emptyList()
+            val loc = BackupKit.listLocal()
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 items = list
-                msg = if (list.isEmpty()) "Chưa có bản sao lưu trên Drive (đăng nhập Google trước)" else "Chọn máy để khôi phục"
+                local = loc
+                msg = if (acc == null)
+                    "Mới lưu email trên máy — chưa có phiên Google nên Drive trống. Dùng bản trong Download."
+                else if (list.isEmpty())
+                    "Đã đăng nhập Google nhưng chưa có file trên Drive. Bấm Sao lưu cấu hình trước."
+                else "Chọn máy trên Drive"
             }
         }.start()
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Khôi phục từ Drive") },
+        title = { Text("Khôi phục sao lưu") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(msg)
                 items.forEach { r ->
                     TextButton(onClick = {
@@ -344,7 +352,15 @@ fun DriveRestoreDialog(onDismiss: () -> Unit) {
                                 onDismiss()
                             }
                         }.start()
-                    }) { Text(r.name) }
+                    }) { Text("Drive: ${r.name}") }
+                }
+                if (local.isNotEmpty()) Text("Trên máy (Download/LocalFM_Backup)")
+                local.forEach { f ->
+                    TextButton(onClick = {
+                        val ok = BackupKit.importJson(ctx, f.readText())
+                        Toast.makeText(ctx, if (ok) "Đã khôi phục ${f.parentFile?.name}" else "Lỗi file", Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    }) { Text(f.parentFile?.name ?: f.name) }
                 }
             }
         },
