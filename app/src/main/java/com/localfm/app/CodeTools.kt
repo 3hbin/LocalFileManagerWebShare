@@ -18,7 +18,7 @@ fun isEditable(file: File) =
         "txt", "md", "log", "json", "xml", "csv",
         "kt", "kts", "java", "js", "ts", "jsx", "tsx",
         "css", "scss", "html", "htm", "py", "c", "cpp", "h",
-        "gradle", "properties", "yml", "yaml", "sh"
+        "gradle", "properties", "yml", "yaml", "sh", "php", "bat", "cmd", "rtf"
     )
 
 private val KEYWORDS = setOf(

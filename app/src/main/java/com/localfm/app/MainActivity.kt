@@ -103,6 +103,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -226,6 +227,8 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
 
 
     var googleMail by remember { mutableStateOf(FmSettings.googleEmail(context)) }
+    var loading by remember { mutableStateOf(false) }
+    var refreshTick by remember { mutableStateOf(0) }
     LaunchedEffect(Unit) { TrashBin.purgeOld(context, 30) }
     val googleSignLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -260,18 +263,18 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
     fun refresh() {
         hasAllFilesAccess = hasManageStoragePermission()
         localIp = NetworkUtils.getLocalWifiIpv4(context)
-        entries = listFilesSafe(currentDir, showHidden)
         serverRunning = ServerBridge.server?.isAlive == true
-        ServerBridge.server?.shareRoot = currentDir
-        ServerBridge.server?.sharePassword = FmSettings.webPassword(context)
-        ServerBridge.server?.hideSizes = FmSettings.hideSizes(context)
+        refreshTick++
     }
 
-    LaunchedEffect(currentDir, showHidden) {
-        entries = listFilesSafe(currentDir, showHidden)
+    LaunchedEffect(currentDir, showHidden, refreshTick) {
+        loading = true
+        val listed = withContext(Dispatchers.IO) { listFilesSafe(currentDir, showHidden) }
+        entries = listed
         ServerBridge.server?.shareRoot = currentDir
         ServerBridge.server?.sharePassword = FmSettings.webPassword(context)
         ServerBridge.server?.hideSizes = FmSettings.hideSizes(context)
+        loading = false
     }
 
     var deepResults by remember { mutableStateOf<List<File>?>(null) }
@@ -404,19 +407,23 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                 current = shortcut,
                 onPick = { shortcut = it },
                 onPictures = {
-                    shortcut = "all"
+                    shortcut = "pic"
+                    filter = "all"
                     currentDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
                 },
                 onDownload = {
-                    shortcut = "all"
+                    shortcut = "dl"
+                    filter = "all"
                     currentDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
                 },
                 onDocs = {
-                    shortcut = "all"
+                    shortcut = "docs"
+                    filter = "all"
                     currentDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS)
                 },
                 onDcim = {
-                    shortcut = "all"
+                    shortcut = "dcim"
+                    filter = "all"
                     currentDir = File(android.os.Environment.getExternalStorageDirectory(), "DCIM")
                 }
             )
@@ -511,6 +518,7 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                 )
             }
 
+            Box(Modifier.weight(1f)) {
             FileList(
                 files = visibleFiles,
                 selected = selected,
@@ -557,9 +565,22 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                     val ok = duplicateSafe(it)
                     toast(context, if (ok) "Đã tạo bản sao" else "Không sao chép được")
                     menuFor = null
-                    entries = listFilesSafe(currentDir, showHidden)
+                    refreshTick++
                 }
             )
+            if (loading) {
+                Box(
+                    Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background.copy(alpha = 0.72f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(12.dp))
+                        Text("Đang tải…")
+                    }
+                }
+            }
+            }
         }
     }
 
@@ -620,7 +641,7 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
                         }
                     }
                     if (googleMail.isNotBlank()) {
-                        MoreItem(Icons.Outlined.AccountCircle, "Google: $googleMail") {}
+                        GoogleProfileRow(email = googleMail)
                     }
                     MoreItem(Icons.Outlined.Folder, "Về bộ nhớ trong") {
                         currentDir = storageRoot; showMore = false
@@ -871,7 +892,7 @@ private fun SearchRow(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp),
         singleLine = true,
-        placeholder = { Text(if (recursive) "Tìm cả máy…" else "Tìm thư mục này") },
+        placeholder = { Text(if (recursive && query.length >= 2) "Tìm cả máy…" else "Tìm thư mục này") },
         leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
         trailingIcon = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -882,7 +903,7 @@ private fun SearchRow(
                     modifier = Modifier.padding(end = 4.dp)
                 )
                 TextButton(onClick = { onRecursive(!recursive) }) {
-                    Text(if (recursive) "Cả máy" else "Thư mục", style = MaterialTheme.typography.labelSmall)
+                    Text(if (recursive && query.length >= 2) "Cả máy" else "Thư mục", style = MaterialTheme.typography.labelSmall)
                 }
             }
         },
@@ -1464,10 +1485,10 @@ private fun ShortcutRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         FilterChip(selected = current == "all", onClick = { onPick("all") }, label = { Text("Tất cả", style = MaterialTheme.typography.labelMedium) })
-        FilterChip(selected = false, onClick = onPictures, label = { Text("Ảnh") })
-        FilterChip(selected = false, onClick = onDownload, label = { Text("Tải xuống") })
-        FilterChip(selected = false, onClick = onDocs, label = { Text("Tài liệu") })
-        FilterChip(selected = false, onClick = onDcim, label = { Text("DCIM") })
+        FilterChip(selected = current == "pic", onClick = onPictures, label = { Text("Ảnh") })
+        FilterChip(selected = current == "dl", onClick = onDownload, label = { Text("Tải xuống") })
+        FilterChip(selected = current == "docs", onClick = onDocs, label = { Text("Tài liệu") })
+        FilterChip(selected = current == "dcim", onClick = onDcim, label = { Text("DCIM") })
         FilterChip(selected = current == "fav", onClick = { onPick("fav") }, label = { Text("Yêu thích") })
         FilterChip(selected = current == "recent", onClick = { onPick("recent") }, label = { Text("Gần đây") })
     }
@@ -1504,6 +1525,45 @@ private fun SelectionBar(
     }
 }
 
+
+@Composable
+private fun GoogleProfileRow(email: String) {
+    val acc = com.google.android.gms.auth.api.signin.GoogleSignIn.getLastSignedInAccount(androidx.compose.ui.platform.LocalContext.current)
+    val url = acc?.photoUrl?.toString().orEmpty()
+    var bmp by remember(url) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    androidx.compose.runtime.LaunchedEffect(url) {
+        if (url.isBlank()) return@LaunchedEffect
+        bmp = try {
+            java.net.URL(url).openStream().use { android.graphics.BitmapFactory.decodeStream(it) }
+        } catch (_: Exception) { null }
+    }
+    val letter = email.firstOrNull()?.uppercaseChar()?.toString() ?: "G"
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.size(36.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                .background(MaterialTheme.colorScheme.primary),
+            contentAlignment = androidx.compose.ui.Alignment.Center
+        ) {
+            val b = bmp
+            if (b != null) {
+                androidx.compose.foundation.Image(
+                    bitmap = b.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.size(36.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                )
+            } else {
+                Text(letter, color = MaterialTheme.colorScheme.onPrimary)
+            }
+        }
+        Spacer(Modifier.width(14.dp))
+        Column {
+            Text(email, style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
 
 @Composable
 private fun MoreItem(
@@ -1586,12 +1646,15 @@ private fun SettingsDialog(
 // -----------------------------------------------------------------------------
 
 private val KNOWN_EXTS = setOf(
-    "pdf","png","jpg","jpeg","gif","webp","bmp","heic","svg",
-    "mp4","mkv","avi","webm","mov","3gp",
-    "mp3","wav","aac","ogg","m4a","flac",
-    "txt","md","log","json","xml","csv","html","htm","kt","java",
-    "doc","docx","xls","xlsx","ppt","pptx",
-    "zip","rar","7z","apk","xapk","apks"
+    "txt","docx","doc","pdf","xlsx","xls","pptx","ppt","odt","ods","rtf",
+    "jpg","jpeg","png","gif","svg","webp","psd","ai","ico","bmp","heic",
+    "mp3","wav","flac","aac","ogg","m4a",
+    "mp4","mkv","avi","mov","webm","3gp",
+    "html","htm","css","js","py","java","cpp","c","json","xml","php","kt","h","ts",
+    "zip","rar","7z","tar","gz",
+    "iso","exe","apk","xapk","ipa","msi","bat","cmd","sh","dll",
+    "obb","bin","cue","nsp","xci","sav","dat","srm","pak","vpk","unity3d","asset","bsp","wad","jar",
+    "mcpack","mcworld","apks"
 )
 
 private fun isKnownExt(file: File) =
@@ -1600,25 +1663,93 @@ private fun isKnownExt(file: File) =
 
 private fun typeIconRes(file: File): Int {
     if (file.isDirectory) return R.drawable.ic_type_folder
-    return when (file.extension.lowercase(Locale.US)) {
-        "pdf" -> R.drawable.ic_type_pdf
-        "doc", "docx" -> R.drawable.ic_type_doc
-        "xls", "xlsx" -> R.drawable.ic_type_xls
-        "ppt", "pptx" -> R.drawable.ic_type_ppt
-        "txt", "md", "log" -> R.drawable.ic_type_txt
-        "csv" -> R.drawable.ic_type_csv
-        "json", "xml", "html", "htm" -> R.drawable.ic_type_code
-        "kt", "java", "js", "ts", "py", "c", "cpp", "h" -> R.drawable.ic_type_code2
-        "png", "jpg", "jpeg", "webp", "bmp", "heic", "svg" -> R.drawable.ic_type_image
-        "gif" -> R.drawable.ic_type_gif
-        "mp4", "mkv", "avi", "webm", "mov", "3gp" -> R.drawable.ic_type_video
-        "mp3", "wav", "aac", "ogg", "m4a", "flac" -> R.drawable.ic_type_audio
-        "zip", "rar", "7z" -> R.drawable.ic_type_zip
-        "apk", "xapk", "apks" -> R.drawable.ic_type_apk
-        "vcf" -> R.drawable.ic_type_contact
-        "ics" -> R.drawable.ic_type_calendar
+    val id = file.extension.lowercase(Locale.US)
+    val res = when (id) {
+        "txt" -> R.drawable.ic_ext_txt
+        "rtf" -> R.drawable.ic_ext_rtf
+        "odt" -> R.drawable.ic_ext_odt
+        "doc" -> R.drawable.ic_ext_doc
+        "docx" -> R.drawable.ic_ext_docx
+        "pdf" -> R.drawable.ic_ext_pdf
+        "xls" -> R.drawable.ic_ext_xls
+        "xlsx" -> R.drawable.ic_ext_xlsx
+        "ods" -> R.drawable.ic_ext_ods
+        "csv" -> R.drawable.ic_ext_csv
+        "ppt" -> R.drawable.ic_ext_ppt
+        "pptx" -> R.drawable.ic_ext_pptx
+        "jpg" -> R.drawable.ic_ext_jpg
+        "jpeg" -> R.drawable.ic_ext_jpeg
+        "png" -> R.drawable.ic_ext_png
+        "gif" -> R.drawable.ic_ext_gif
+        "svg" -> R.drawable.ic_ext_svg
+        "webp" -> R.drawable.ic_ext_webp
+        "psd" -> R.drawable.ic_ext_psd
+        "ai" -> R.drawable.ic_ext_ai
+        "ico" -> R.drawable.ic_ext_ico
+        "bmp" -> R.drawable.ic_ext_bmp
+        "heic" -> R.drawable.ic_ext_heic
+        "mp3" -> R.drawable.ic_ext_mp3
+        "wav" -> R.drawable.ic_ext_wav
+        "flac" -> R.drawable.ic_ext_flac
+        "aac" -> R.drawable.ic_ext_aac
+        "ogg" -> R.drawable.ic_ext_ogg
+        "m4a" -> R.drawable.ic_ext_m4a
+        "mp4" -> R.drawable.ic_ext_mp4
+        "mkv" -> R.drawable.ic_ext_mkv
+        "avi" -> R.drawable.ic_ext_avi
+        "mov" -> R.drawable.ic_ext_mov
+        "webm" -> R.drawable.ic_ext_webm
+        "3gp" -> R.drawable.ic_ext_3gp
+        "html" -> R.drawable.ic_ext_html
+        "htm" -> R.drawable.ic_ext_htm
+        "css" -> R.drawable.ic_ext_css
+        "js" -> R.drawable.ic_ext_js
+        "py" -> R.drawable.ic_ext_py
+        "java" -> R.drawable.ic_ext_java
+        "cpp" -> R.drawable.ic_ext_cpp
+        "c" -> R.drawable.ic_ext_c
+        "json" -> R.drawable.ic_ext_json
+        "xml" -> R.drawable.ic_ext_xml
+        "php" -> R.drawable.ic_ext_php
+        "kt" -> R.drawable.ic_ext_kt
+        "h" -> R.drawable.ic_ext_h
+        "ts" -> R.drawable.ic_ext_ts
+        "zip" -> R.drawable.ic_ext_zip
+        "rar" -> R.drawable.ic_ext_rar
+        "7z" -> R.drawable.ic_ext_7z
+        "tar" -> R.drawable.ic_ext_tar
+        "gz" -> R.drawable.ic_ext_gz
+        "iso" -> R.drawable.ic_ext_iso
+        "exe" -> R.drawable.ic_ext_exe
+        "msi" -> R.drawable.ic_ext_msi
+        "dll" -> R.drawable.ic_ext_dll
+        "ipa" -> R.drawable.ic_ext_ipa
+        "apk" -> R.drawable.ic_ext_apk
+        "xapk" -> R.drawable.ic_ext_xapk
+        "apks" -> R.drawable.ic_ext_apks
+        "bat" -> R.drawable.ic_ext_bat
+        "cmd" -> R.drawable.ic_ext_cmd
+        "sh" -> R.drawable.ic_ext_sh
+        "obb" -> R.drawable.ic_ext_obb
+        "bin" -> R.drawable.ic_ext_bin
+        "cue" -> R.drawable.ic_ext_cue
+        "nsp" -> R.drawable.ic_ext_nsp
+        "xci" -> R.drawable.ic_ext_xci
+        "sav" -> R.drawable.ic_ext_sav
+        "dat" -> R.drawable.ic_ext_dat
+        "srm" -> R.drawable.ic_ext_srm
+        "pak" -> R.drawable.ic_ext_pak
+        "vpk" -> R.drawable.ic_ext_vpk
+        "unity3d" -> R.drawable.ic_ext_unity3d
+        "asset" -> R.drawable.ic_ext_asset
+        "bsp" -> R.drawable.ic_ext_bsp
+        "wad" -> R.drawable.ic_ext_wad
+        "jar" -> R.drawable.ic_ext_jar
+        "mcpack" -> R.drawable.ic_ext_mcpack
+        "mcworld" -> R.drawable.ic_ext_mcworld
         else -> R.drawable.ic_type_unknown
     }
+    return res
 }
 
 private fun iconFor(file: File): ImageVector {

@@ -7,7 +7,9 @@ import android.content.Context
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -208,7 +210,7 @@ fun openHtmlInBrowser(context: Context, file: File) {
 @Composable
 fun CreateFileDialog(dir: File, onDismiss: () -> Unit, onCreated: () -> Unit) {
     val ctx = LocalContext.current
-    val exts = listOf("txt", "html", "js", "kt", "json", "xml", "css", "md", "zip")
+    val exts = listOf("txt","html","css","js","py","java","json","xml","md","php","sh","zip")
     var name by remember { mutableStateOf("tep_moi") }
     var ext by remember { mutableStateOf("txt") }
     AlertDialog(
@@ -224,9 +226,13 @@ fun CreateFileDialog(dir: File, onDismiss: () -> Unit, onCreated: () -> Unit) {
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text("Đuôi: .$ext")
-                Row(Modifier.fillMaxWidth()) {
-                    exts.forEach { e ->
-                        TextButton(onClick = { ext = e }) { Text(if (ext == e) "[$e]" else e) }
+                Column(Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState())) {
+                    exts.chunked(4).forEach { row ->
+                        Row(Modifier.fillMaxWidth()) {
+                            row.forEach { e ->
+                                TextButton(onClick = { ext = e }) { Text(if (ext == e) "[$e]" else e) }
+                            }
+                        }
                     }
                 }
             }
@@ -400,10 +406,10 @@ fun TrashSwipeDialog(
     var list by remember { mutableStateOf(items) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Thùng rác (kéo)") },
+        title = { Text("Thùng rác") },
         text = {
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                Text("Kéo phải: khôi phục. Kéo trái: xóa hẳn.")
+                Text("Kéo phải khôi phục · kéo trái xóa hẳn")
                 if (list.isEmpty()) Text("Trống")
                 list.forEach { f ->
                     val state = androidx.compose.material3.rememberSwipeToDismissBoxState(
@@ -420,16 +426,39 @@ fun TrashSwipeDialog(
                         }
                     )
                     androidx.compose.material3.SwipeToDismissBox(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         state = state,
                         backgroundContent = {
-                            val dir = state.dismissDirection
-                            Text(
-                                if (dir == androidx.compose.material3.SwipeToDismissBoxValue.EndToStart) "Xóa hẳn"
-                                else "Khôi phục"
-                            )
+                            val end = state.dismissDirection ==
+                                androidx.compose.material3.SwipeToDismissBoxValue.EndToStart
+                            androidx.compose.foundation.layout.Box(
+                                Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                                    .background(
+                                        if (end) androidx.compose.ui.graphics.Color(0xFF8B2E2E)
+                                        else androidx.compose.ui.graphics.Color(0xFF1B5E3B)
+                                    ),
+                                contentAlignment = if (end) androidx.compose.ui.Alignment.CenterEnd
+                                else androidx.compose.ui.Alignment.CenterStart
+                            ) {
+                                Text(
+                                    if (end) "  Xóa hẳn  " else "  Khôi phục  ",
+                                    color = androidx.compose.ui.graphics.Color.White
+                                )
+                            }
                         }
                     ) {
-                        Text(f.name.substringAfter("_"), modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp))
+                        Row(
+                            Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .padding(horizontal = 8.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            Text(
+                                f.name.substringAfter("_"),
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
             }

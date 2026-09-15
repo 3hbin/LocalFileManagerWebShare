@@ -26,14 +26,25 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import java.io.File
 
-fun isImage(file: File) =
-    file.extension.lowercase() in setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "heic")
+fun isImage(file: File): Boolean {
+    if (file.isDirectory) return false
+    val n = file.name.lowercase()
+    return n.endsWith(".png") || n.endsWith(".jpg") || n.endsWith(".jpeg") ||
+        n.endsWith(".gif") || n.endsWith(".webp") || n.endsWith(".bmp") ||
+        n.endsWith(".heic") || n.endsWith(".ico") || n.endsWith(".svg")
+}
 
 fun isMedia(file: File) =
-    file.extension.lowercase() in setOf("mp4", "mkv", "webm", "3gp", "mp3", "wav", "aac", "ogg", "m4a", "flac")
+    file.extension.lowercase() in setOf(
+        "mp4", "mkv", "webm", "3gp", "avi", "mov",
+        "mp3", "wav", "aac", "ogg", "m4a", "flac"
+    )
 
 fun isText(file: File) =
-    file.extension.lowercase() in setOf("txt", "md", "log", "json", "xml", "csv", "kt", "java")
+    file.extension.lowercase() in setOf(
+        "txt", "md", "log", "json", "xml", "csv", "kt", "java",
+        "css", "js", "py", "cpp", "c", "php", "rtf", "bat", "cmd", "sh"
+    )
 
 fun isPdf(file: File) = file.extension.lowercase() == "pdf"
 

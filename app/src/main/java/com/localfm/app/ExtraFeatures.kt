@@ -165,10 +165,10 @@ object ThumbCache {
             val opt = BitmapFactory.Options().apply {
                 inJustDecodeBounds = true
             }
-            BitmapFactory.decodeFile(file.absolutePath, opt)
+            file.inputStream().use { BitmapFactory.decodeStream(it, null, opt) }
             opt.inSampleSize = (maxOf(opt.outWidth, opt.outHeight) / 192).coerceAtLeast(1)
             opt.inJustDecodeBounds = false
-            BitmapFactory.decodeFile(file.absolutePath, opt)?.also {
+            file.inputStream().use { BitmapFactory.decodeStream(it, null, opt) }?.also {
                 mem.put(file.absolutePath, it)
             }
         } catch (_: Exception) { null }
