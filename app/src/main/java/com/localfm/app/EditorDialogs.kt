@@ -373,3 +373,51 @@ fun ManualEmailDialog(initial: String, onDismiss: () -> Unit, onSave: (String) -
         dismissButton = { TextButton(onClick = onDismiss) { Text("Hủy") } }
     )
 }
+
+@Composable
+fun TrashSwipeDialog(
+    items: List<File>,
+    onRestore: (File) -> Unit,
+    onDeleteForever: (File) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var list by remember { mutableStateOf(items) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Thùng rác (kéo)") },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                Text("Kéo phải: khôi phục. Kéo trái: xóa hẳn.")
+                if (list.isEmpty()) Text("Trống")
+                list.forEach { f ->
+                    val state = androidx.compose.material3.rememberSwipeToDismissBoxState(
+                        confirmValueChange = { value ->
+                            when (value) {
+                                androidx.compose.material3.SwipeToDismissBoxValue.StartToEnd -> {
+                                    onRestore(f); list = list.filter { it != f }; true
+                                }
+                                androidx.compose.material3.SwipeToDismissBoxValue.EndToStart -> {
+                                    onDeleteForever(f); list = list.filter { it != f }; true
+                                }
+                                else -> false
+                            }
+                        }
+                    )
+                    androidx.compose.material3.SwipeToDismissBox(
+                        state = state,
+                        backgroundContent = {
+                            val dir = state.dismissDirection
+                            Text(
+                                if (dir == androidx.compose.material3.SwipeToDismissBoxValue.EndToStart) "Xóa hẳn"
+                                else "Khôi phục"
+                            )
+                        }
+                    ) {
+                        Text(f.name.substringAfter("_"), modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp))
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Đóng") } }
+    )
+}

@@ -231,7 +231,8 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
         ActivityResultContracts.StartActivityForResult()
     ) { res ->
         if (res.resultCode != android.app.Activity.RESULT_OK) {
-            toast(context, "Google trả về mã ${res.resultCode} (0 = hủy / thiếu SHA-1)")
+            toast(context, "Google mã ${res.resultCode} — nhập email thủ công hoặc thêm SHA-1")
+            showManualEmail = true
             return@rememberLauncherForActivityResult
         }
         val task = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(res.data)
@@ -734,23 +735,16 @@ private fun FileManagerApp(darkMode: Boolean, onDarkMode: (Boolean) -> Unit) {
         DriveRestoreDialog(onDismiss = { showDriveRestore = false })
     }
     if (showTrash) {
-        val items = TrashBin.list(context)
-        AlertDialog(
-            onDismissRequest = { showTrash = false },
-            title = { Text("Thùng rác (xoá sau 30 ngày)") },
-            text = {
-                Column {
-                    if (items.isEmpty()) Text("Trống")
-                    items.take(12).forEach { f ->
-                        Text(f.name, modifier = Modifier.clickable {
-                            TrashBin.restore(context, f, currentDir)
-                            entries = listFilesSafe(currentDir, showHidden)
-                        })
-                    }
-                    Text("Chạm tên để khôi phục về thư mục hiện tại", style = MaterialTheme.typography.bodySmall)
-                }
+        TrashSwipeDialog(
+            items = TrashBin.list(context),
+            onRestore = { f ->
+                TrashBin.restore(context, f, currentDir)
+                entries = listFilesSafe(currentDir, showHidden)
             },
-            confirmButton = { TextButton(onClick = { showTrash = false }) { Text("Đóng") } }
+            onDeleteForever = { f ->
+                f.deleteRecursively()
+            },
+            onDismiss = { showTrash = false }
         )
     }
 
