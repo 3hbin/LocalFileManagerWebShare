@@ -1,5 +1,6 @@
 package com.localfm.app
 
+import android.os.Environment
 import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -69,6 +70,18 @@ object ZipJobs {
 
     private const val BUF = 64 * 1024
 
+    /**
+     * Tệp mở từ app khác được IncomingFiles sao chép vào bộ nhớ đệm riêng (không thấy được trong trình quản lý).
+     * Khi tệp không nằm trong /storage/ thì đích là thư mục Download để người dùng tìm thấy.
+     */
+    private fun visibleParent(f: File): File? {
+        if (f.absolutePath.startsWith("/storage/")) return f.parentFile
+        return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).apply { mkdirs() }
+    }
+
+    /** Bỏ tiền tố "open_<số>_" do bước sao chép tạo ra. */
+    private fun cleanBase(f: File): String = f.nameWithoutExtension.replace(Regex("^open_\\d+_"), "")
+
     private fun uniqueDir(parent: File, base: String): File {
         var d = File(parent, base)
         var i = 2
@@ -103,8 +116,8 @@ object ZipJobs {
         if (!zip.exists()) return Result(false, "Không tìm thấy tệp")
         val lower = zip.name.lowercase()
         if (lower.endsWith(".rar") || lower.endsWith(".7z")) return Result(false, "Chưa hỗ trợ RAR/7z — hãy dùng ZIP")
-        val parent = zip.parentFile ?: return Result(false, "Thư mục không hợp lệ")
-        val dest = uniqueDir(parent, zip.nameWithoutExtension)
+        val parent = visibleParent(zip) ?: return Result(false, "Thư mục không hợp lệ")
+        val dest = uniqueDir(parent, cleanBase(zip))
         val encrypted = ZipUtils.isEncrypted(zip)
         var count = 0
         return try {
@@ -158,7 +171,7 @@ object ZipJobs {
             if (ctl.cancelled) {
                 dest.deleteRecursively()
                 Result(false, "Đã huỷ, đã xoá phần giải nén dở")
-            } else Result(true, "Đã giải nén $count tệp vào ./${dest.name}/")
+            } else Result(true, "Đã giải nén $count tệp vào ${dest.absolutePath}")
         } catch (e: Exception) {
             dest.deleteRecursively()
             val m = e.message.orEmpty()
@@ -250,7 +263,7 @@ object ZipJobs {
         if (sources.firstOrNull()?.parentFile?.let { SystemGuard.isProtected(it) } == true) {
             return Result(false, "Thư mục hệ thống, không nén vào đây")
         }
-        val parent = sources.firstOrNull()?.parentFile ?: return Result(false, "Không có mục để nén")
+        val parent = sources.firstOrNull()?.let { visibleParent(it) } ?: return Result(false, "Không có mục để nén")
         val base = if (sources.size == 1) {
             val s = sources[0]
             if (s.isDirectory) s.name else s.nameWithoutExtension
