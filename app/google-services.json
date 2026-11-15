@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "29785662413",
+    "project_id": "localfilemanagerwebshare",
+    "storage_bucket": "localfilemanagerwebshare.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:29785662413:android:05bf2e22e5ba7b687cda84",
+        "android_client_info": {
+          "package_name": "com.localfm.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "29785662413-tfo1tvk34t3702h35912totb02vssjo2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAnh55HMxDcUfI8tIKd-OAapPqXS71R40k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "29785662413-tfo1tvk34t3702h35912totb02vssjo2.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,86 @@
+package com.localfm.app
+
+import android.content.Context
+import org.json.JSONArray
+
+object FmSettings {
+    private const val P = "local_fm_prefs"
+
+    fun darkMode(ctx: Context): Boolean =
+        ctx.getSharedPreferences(P, 0).getBoolean("dark_mode", false)
+
+    fun setDarkMode(ctx: Context, on: Boolean) {
+        ctx.getSharedPreferences(P, 0).edit().putBoolean("dark_mode", on).apply()
+    }
+
+    fun webPassword(ctx: Context): String =
+        ctx.getSharedPreferences(P, 0).getString("web_pass", "") ?: ""
+
+    fun setWebPassword(ctx: Context, pass: String) {
+        ctx.getSharedPreferences(P, 0).edit().putString("web_pass", pass).apply()
+    }
+
+    fun hideSizes(ctx: Context): Boolean =
+        ctx.getSharedPreferences(P, 0).getBoolean("hide_sizes", false)
+
+    fun setHideSizes(ctx: Context, on: Boolean) {
+        ctx.getSharedPreferences(P, 0).edit().putBoolean("hide_sizes", on).apply()
+    }
+
+    fun favorites(ctx: Context): MutableList<String> {
+        val raw = ctx.getSharedPreferences(P, 0).getString("favs", "[]") ?: "[]"
+        val arr = JSONArray(raw)
+        return MutableList(arr.length()) { arr.getString(it) }
+    }
+
+    fun toggleFavorite(ctx: Context, path: String): Boolean {
+        val list = favorites(ctx)
+        val on = if (list.contains(path)) {
+            list.remove(path); false
+        } else {
+            list.add(0, path); true
+        }
+        saveList(ctx, "favs", list.take(40))
+        return on
+    }
+
+    fun isFavorite(ctx: Context, path: String) = favorites(ctx).contains(path)
+
+    fun recents(ctx: Context): MutableList<String> {
+        val raw = ctx.getSharedPreferences(P, 0).getString("recents", "[]") ?: "[]"
+        val arr = JSONArray(raw)
+        return MutableList(arr.length()) { arr.getString(it) }
+    }
+
+    fun addRecent(ctx: Context, path: String) {
+        val list = recents(ctx)
+        list.remove(path)
+        list.add(0, path)
+        saveList(ctx, "recents", list.take(30))
+    }
+
+
+    fun port(ctx: Context) = ctx.getSharedPreferences(P, 0).getInt("port", 8080)
+    fun setPort(ctx: Context, v: Int) { ctx.getSharedPreferences(P, 0).edit().putInt("port", v).apply() }
+    fun autoOffMin(ctx: Context) = ctx.getSharedPreferences(P, 0).getInt("auto_off", 0)
+    fun setAutoOffMin(ctx: Context, v: Int) { ctx.getSharedPreferences(P, 0).edit().putInt("auto_off", v).apply() }
+    fun receiveOnly(ctx: Context) = ctx.getSharedPreferences(P, 0).getBoolean("recv_only", false)
+    fun setReceiveOnly(ctx: Context, on: Boolean) { ctx.getSharedPreferences(P, 0).edit().putBoolean("recv_only", on).apply() }
+    fun googleEmail(ctx: Context) = ctx.getSharedPreferences(P, 0).getString("g_email", "") ?: ""
+    fun setGoogleEmail(ctx: Context, e: String) { ctx.getSharedPreferences(P, 0).edit().putString("g_email", e).apply() }
+    fun lang(ctx: Context) = ctx.getSharedPreferences(P, 0).getString("lang", "vi") ?: "vi"
+    fun setLang(ctx: Context, v: String) { ctx.getSharedPreferences(P, 0).edit().putString("lang", v).apply() }
+    const val PRIVACY_URL = "https://3hbin.github.io/LocalFileManagerWebShare/privacy.html"
+
+    private fun saveList(ctx: Context, key: String, list: List<String>) {
+        val arr = JSONArray()
+        list.forEach { arr.put(it) }
+        ctx.getSharedPreferences(P, 0).edit().putString(key, arr.toString()).apply()
+    }
+}
+
+data class ClipBoard(val paths: List<String>, val cut: Boolean)
+
+object ClipHolder {
+    var clip: ClipBoard? = null
+}
