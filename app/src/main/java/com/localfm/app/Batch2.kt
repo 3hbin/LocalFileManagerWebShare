@@ -105,6 +105,7 @@ object ReadOnlyLocks {
 
     /** Khoá có hiệu lực cho chính mục đó và mọi mục nằm bên trong nếu đó là thư mục. */
     fun isLocked(f: File): Boolean {
+        if (SystemGuard.isProtected(f)) return true
         val p = f.absolutePath
         return paths.any { p == it || p.startsWith("$it/") }
     }

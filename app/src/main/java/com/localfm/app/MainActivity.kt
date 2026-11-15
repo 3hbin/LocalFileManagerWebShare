@@ -500,7 +500,7 @@ private fun FileManagerApp(darkMode: Boolean, startFile: File? = null, onDarkMod
         },
         snackbarHost = { BottomOverlayHost(onRefresh = { entries = listFilesSafe(currentDir, showHidden) }) },
         floatingActionButton = {
-            if (hasAllFilesAccess) {
+            if (hasAllFilesAccess && !SystemGuard.isProtected(currentDir)) {
                 FloatingActionButton(
                     onClick = { showCreateFolder = true },
                     containerColor = MaterialTheme.colorScheme.primaryContainer
@@ -617,6 +617,7 @@ private fun FileManagerApp(darkMode: Boolean, startFile: File? = null, onDarkMod
                 SelectionBar(
                     count = selected.size,
                     hasClip = (clipRev >= 0 && ClipHolder.clip != null),
+                    canWrite = !SystemGuard.isProtected(currentDir),
                     onClear = { selected = emptySet(); selecting = false },
                     onDelete = {
                         val trashed = mutableListOf<Pair<File, File>>()
@@ -863,8 +864,10 @@ private fun FileManagerApp(darkMode: Boolean, startFile: File? = null, onDarkMod
                             toast(context, "Không mở được đăng nhập Google")
                         }
                     }
-                    MoreItem(Icons.Outlined.NoteAdd, "Tạo tệp theo đuôi") {
-                        showCreateFile = true; showMore = false
+                    if (!SystemGuard.isProtected(currentDir)) {
+                        MoreItem(Icons.Outlined.NoteAdd, "Tạo tệp theo đuôi") {
+                            showCreateFile = true; showMore = false
+                        }
                     }
                     MoreItem(Icons.Outlined.Archive, "Nén mục đã chọn") {
                         val src = selected.map { File(it) }.filter { it.exists() }
@@ -1829,23 +1832,25 @@ private fun FileRow(
                 },
                 leadingIcon = { Icon(Icons.Outlined.Unarchive, contentDescription = null) }
             )
-            DropdownMenuItem(
-                text = { Text("Đổi tên") },
-                onClick = onRename,
-                leadingIcon = {
-                    Icon(Icons.Outlined.DriveFileRenameOutline, contentDescription = null)
-                }
-            )
-            DropdownMenuItem(
-                text = { Text("Tạo bản sao") },
-                onClick = onDuplicate,
-                leadingIcon = { Icon(Icons.Outlined.FileCopy, contentDescription = null) }
-            )
-            DropdownMenuItem(
-                text = { Text("Xoá") },
-                onClick = onDelete,
-                leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) }
-            )
+            if (!ReadOnlyLocks.isLocked(file)) {
+                DropdownMenuItem(
+                    text = { Text("Đổi tên") },
+                    onClick = onRename,
+                    leadingIcon = {
+                        Icon(Icons.Outlined.DriveFileRenameOutline, contentDescription = null)
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Tạo bản sao") },
+                    onClick = onDuplicate,
+                    leadingIcon = { Icon(Icons.Outlined.FileCopy, contentDescription = null) }
+                )
+                DropdownMenuItem(
+                    text = { Text("Xoá") },
+                    onClick = onDelete,
+                    leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) }
+                )
+            }
         }
     }
 }
@@ -2038,7 +2043,8 @@ private fun SelectionBar(
     onPaste: () -> Unit,
     onZip: () -> Unit,
     onShare: () -> Unit,
-    onSelectAll: () -> Unit
+    onSelectAll: () -> Unit,
+    canWrite: Boolean = true
 ) {
     Surface(
         modifier = Modifier
@@ -2057,11 +2063,11 @@ private fun SelectionBar(
         Text(if (hasClip && count == 0) "Bấm Dán trong thư mục đang mở" else "$count đã chọn", modifier = Modifier.padding(end = 8.dp))
         TextButton(onClick = onSelectAll) { Text("Chọn hết") }
         if (count > 0) TextButton(onClick = onCopy) { Text("Sao chép") }
-        if (count > 0) TextButton(onClick = onCut) { Text("Cắt") }
-        if (hasClip) TextButton(onClick = onPaste) { Text("Dán vào đây") }
+        if (canWrite && count > 0) TextButton(onClick = onCut) { Text("Cắt") }
+        if (canWrite && hasClip) TextButton(onClick = onPaste) { Text("Dán vào đây") }
         TextButton(onClick = onZip) { Text("ZIP") }
         TextButton(onClick = onShare) { Text("Chia sẻ") }
-        TextButton(onClick = onDelete) { Text("Xoá") }
+        if (canWrite) TextButton(onClick = onDelete) { Text("Xoá") }
         TextButton(onClick = onClear) { Text("Huỷ") }
     }
     }
@@ -2557,6 +2563,7 @@ private fun renameSafe(file: File, newName: String): String? {
 }
 
 private fun createFolderSafe(parent: File, name: String): Boolean {
+    if (SystemGuard.isProtected(parent)) return false
     val cleaned = name.trim()
     if (cleaned.isEmpty() || cleaned.contains("/") || cleaned.contains("\\")) return false
     val dir = File(parent, cleaned)

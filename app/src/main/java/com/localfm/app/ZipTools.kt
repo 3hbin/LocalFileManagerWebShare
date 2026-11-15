@@ -99,6 +99,7 @@ object ZipJobs {
     } catch (_: Exception) { false }
 
     fun extract(zip: File, password: String?, report: (Float, String) -> Unit, ctl: JobControl): Result {
+        if (SystemGuard.isProtected(zip.parentFile ?: zip)) return Result(false, "Thư mục hệ thống, không giải nén vào đây")
         if (!zip.exists()) return Result(false, "Không tìm thấy tệp")
         val lower = zip.name.lowercase()
         if (lower.endsWith(".rar") || lower.endsWith(".7z")) return Result(false, "Chưa hỗ trợ RAR/7z — hãy dùng ZIP")
@@ -246,6 +247,9 @@ object ZipJobs {
     }
 
     fun compress(sources: List<File>, report: (Float, String) -> Unit, ctl: JobControl, password: String? = null): Result {
+        if (sources.firstOrNull()?.parentFile?.let { SystemGuard.isProtected(it) } == true) {
+            return Result(false, "Thư mục hệ thống, không nén vào đây")
+        }
         val parent = sources.firstOrNull()?.parentFile ?: return Result(false, "Không có mục để nén")
         val base = if (sources.size == 1) {
             val s = sources[0]
