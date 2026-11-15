@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -134,7 +135,7 @@ fun VolumeChips(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         items.forEach { v ->
-            val readable = v.mounted && (readableMap[v.root.absolutePath] == true)
+            val readable = v.mounted && (readableMap[v.root.absolutePath] ?: false)
             val label = when {
                 !v.mounted -> "${v.name} · chưa gắn"
                 !readable -> "${v.name} · cần cấp quyền"
