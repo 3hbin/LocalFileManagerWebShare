@@ -35,8 +35,10 @@ class LocalWebServer(
 
     override fun serve(session: IHTTPSession): Response {
         return try {
+            touchClient(session)
             val uri = routePath(session)
             if (uri == "/style.css") return cssResponse()
+            if (uri == "/app.js") return newFixedLengthResponse(Response.Status.OK, "application/javascript; charset=utf-8", WEB_JS)
             if (uri.startsWith("/s/")) return serveTempLink(uri.removePrefix("/s/"), session.method == Method.GET)
             if (!authorized(session)) {
                 return if (session.method == Method.POST && uri == "/login") handleLogin(session)
@@ -94,6 +96,21 @@ class LocalWebServer(
             raw.startsWith("$p/") -> raw.removePrefix(p)
             else -> raw
         }
+    }
+
+    /** Ghi nhận thiết bị đang dùng Web Share (theo IP, bỏ qua localhost). */
+    private val clients = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private fun touchClient(session: IHTTPSession) {
+        val ip = session.remoteIpAddress
+        if (!ip.isNullOrBlank() && ip != "127.0.0.1" && ip != "::1") clients[ip] = System.currentTimeMillis()
+    }
+
+    /** Số thiết bị có hoạt động trong 2 phút gần đây. */
+    fun activeClients(): Int {
+        val cut = System.currentTimeMillis() - 120_000L
+        clients.entries.removeIf { it.value < cut }
+        return clients.size
     }
 
     private fun token(): String {
@@ -425,6 +442,7 @@ d.addEventListener('drop',e=>{if(e.dataTransfer.files.length){f.files=e.dataTran
             <meta name="viewport" content="width=device-width, initial-scale=1"/>
             <title>$title</title>
             <link rel="stylesheet" href="/style.css"/>
+            <script src="/app.js" defer></script>
         </head>
     """.trimIndent()
 }
@@ -432,52 +450,77 @@ d.addEventListener('drop',e=>{if(e.dataTransfer.files.length){f.files=e.dataTran
 /** CSS toi gian, chuyen nghiep — khong dung emoji. */
 private const val WEB_CSS = """
 :root {
-  --bg: #eef3f9;
-  --card: #ffffff;
-  --text: #152033;
-  --muted: #5b6578;
-  --line: #d7deea;
-  --brand: #2f6fed;
+  --bg: #f1f5fb; --card: #ffffff; --text: #111a2b; --muted: #5f6b7e;
+  --line: #e1e7f0; --brand: #2f6fed; --brand2: #6aa0ff; --ok: #1f9d55; --soft: #e9f0ff;
+  --shadow: 0 10px 30px rgba(17,26,43,.07);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0d1420; --card: #162132; --text: #e8eef9; --muted: #98a6bb;
+    --line: #26344a; --soft: #1b2b45; --shadow: 0 10px 30px rgba(0,0,0,.35); }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
   font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
-.wrap { max-width: 980px; margin: 32px auto; padding: 0 20px 48px; }
-header { margin-bottom: 20px; }
-.brand { font-size: 22px; font-weight: 650; letter-spacing: .2px; }
-.sub { color: var(--muted); font-size: 13px; margin-top: 6px; word-break: break-all; }
+body { background: radial-gradient(1200px 500px at 10% -10%, var(--soft), transparent 60%), var(--bg); min-height: 100vh; }
+.wrap { max-width: 980px; margin: 28px auto; padding: 0 20px 48px; animation: fadeUp .45s ease-out both; }
+header { margin-bottom: 18px; display: flex; flex-direction: column; gap: 6px; }
+.brand { font-size: 22px; font-weight: 700; letter-spacing: .2px; display: flex; align-items: center; gap: 10px; }
+.brand::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--ok);
+  box-shadow: 0 0 0 0 rgba(31,157,85,.5); animation: pulse 2s infinite; }
+.sub { color: var(--muted); font-size: 13px; word-break: break-all; }
+.pill { display: inline-flex; align-items: center; gap: 6px; background: var(--soft); color: var(--brand);
+  border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 600; width: fit-content; }
 .crumb { font-size: 14px; margin: 8px 0 18px; }
 .crumb a { color: var(--brand); text-decoration: none; }
+.crumb a:hover { text-decoration: underline; }
 .crumb .sep { margin: 0 6px; color: var(--muted); }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px;
-  padding: 16px 18px; margin-bottom: 16px; box-shadow: 0 8px 24px rgba(21,32,51,.04); }
-.upload h2 { font-size: 15px; margin: 0 0 12px; font-weight: 600; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+  padding: 18px 20px; margin-bottom: 16px; box-shadow: var(--shadow); animation: fadeUp .5s ease-out both; }
+.upload h2 { font-size: 15px; margin: 0 0 12px; font-weight: 650; }
 form { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+input[type=file] { font-size: 13px; color: var(--muted); max-width: 100%; }
 button, .dl {
-  background: var(--brand); color: #fff; border: 0; border-radius: 10px;
-  padding: 8px 14px; font-size: 13px; cursor: pointer; text-decoration: none;
+  background: linear-gradient(135deg, var(--brand), var(--brand2)); color: #fff; border: 0; border-radius: 12px;
+  padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none;
+  transition: transform .15s ease, box-shadow .2s ease, filter .2s ease; box-shadow: 0 6px 16px rgba(47,111,237,.25);
 }
-button:hover, .dl:hover { filter: brightness(1.05); }
+button:hover, .dl:hover { transform: translateY(-1px); box-shadow: 0 10px 22px rgba(47,111,237,.32); }
+button:active, .dl:active { transform: scale(.97); }
+button:disabled { opacity: .6; cursor: default; transform: none; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px;
-  padding: 8px 6px; border-bottom: 1px solid var(--line); }
-td { padding: 10px 6px; border-bottom: 1px solid var(--line); }
-.name { font-weight: 550; }
+th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .4px;
+  padding: 10px 8px; border-bottom: 1px solid var(--line); }
+td { padding: 12px 8px; border-bottom: 1px solid var(--line); transition: background .15s ease; }
+tr { animation: fadeUp .4s ease-out both; }
+tbody tr:hover td { background: var(--soft); }
+.name { font-weight: 560; }
 a.name.dir { color: var(--brand); text-decoration: none; }
-.empty { color: var(--muted); text-align: center; padding: 24px 0; }
-.drop.on { outline: 2px dashed var(--brand); background: #e8f0ff; }
+a.name.dir:hover { text-decoration: underline; }
+.empty { color: var(--muted); text-align: center; padding: 28px 0; }
+.drop { transition: transform .2s ease; }
+.drop.on { outline: 2px dashed var(--brand); background: var(--soft); transform: scale(1.01); }
 footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8px; }
+/* Thanh tiến trình tải lên */
+#prog { position: fixed; left: 0; right: 0; top: 0; z-index: 10; padding: 10px 20px; background: var(--card);
+  border-bottom: 1px solid var(--line); box-shadow: var(--shadow); display: none; transform: translateY(-100%); transition: transform .3s ease; }
+#prog.show { display: block; transform: none; }
+#prog .txt { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 6px; }
+#prog .track { height: 8px; background: var(--line); border-radius: 999px; overflow: hidden; }
+#prog .fill { height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, var(--brand), var(--brand2));
+  transition: width .2s linear; background-size: 200% 100%; animation: shine 1.4s linear infinite; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(31,157,85,.5); } 70% { box-shadow: 0 0 0 8px rgba(31,157,85,0); } 100% { box-shadow: 0 0 0 0 rgba(31,157,85,0); } }
+@keyframes shine { from { background-position: 0 0; } to { background-position: 200% 0; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 @media (max-width: 720px) {
-  .wrap { margin: 12px auto; padding: 0 10px 32px; }
+  .wrap { margin: 12px auto; padding: 0 12px 32px; }
   .brand { font-size: 18px; }
   .sub { font-size: 11px; }
-  .card { padding: 12px; border-radius: 12px; }
+  .card { padding: 14px; border-radius: 14px; }
   table { font-size: 13px; }
-  th:nth-child(3), td:nth-child(3),
-  th:nth-child(4), td:nth-child(4),
-  th.col-date, td:nth-child(5) { display: none; }
-  button, .dl { padding: 6px 10px; font-size: 12px; border-radius: 8px; white-space: nowrap; }
-  td { padding: 8px 4px; vertical-align: middle; }
+  th:nth-child(3), td:nth-child(3), th:nth-child(4), td:nth-child(4), th.col-date, td:nth-child(5) { display: none; }
+  button, .dl { padding: 7px 11px; font-size: 12px; border-radius: 10px; white-space: nowrap; }
+  td { padding: 10px 4px; vertical-align: middle; }
   .name { max-width: 58vw; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 """
@@ -492,3 +535,72 @@ private class DeleteOnCloseInputStream(private val target: File) :
 
 /** Link tải tạm: file, thời điểm hết hạn, số lần còn được tải. */
 private class TempLink(val file: File, val expiresAt: Long, var usesLeft: Int)
+
+private const val WEB_JS = """
+(function () {
+  function fmt(n) {
+    if (n >= 1073741824) return (n / 1073741824).toFixed(2) + " GB";
+    if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+    if (n >= 1024) return (n / 1024).toFixed(0) + " KB";
+    return n + " B";
+  }
+  function bar() {
+    var el = document.getElementById("prog");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "prog";
+      el.innerHTML = '<div class="txt"><span id="progT">Đang tải lên…</span><span id="progS"></span></div>' +
+        '<div class="track"><div class="fill" id="progF"></div></div>';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  document.addEventListener("submit", function (e) {
+    var f = e.target;
+    if (!f || f.enctype !== "multipart/form-data" || !window.FormData) return;
+    var input = f.querySelector('input[type=file]');
+    if (!input || !input.files || input.files.length === 0) return;
+    e.preventDefault();
+    var el = bar();
+    el.classList.add("show");
+    var fill = document.getElementById("progF");
+    var sp = document.getElementById("progS");
+    var t0 = Date.now();
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", f.action || location.href, true);
+    xhr.upload.onprogress = function (ev) {
+      if (!ev.lengthComputable) return;
+      var pct = ev.loaded / ev.total * 100;
+      fill.style.width = pct.toFixed(1) + "%";
+      var secs = Math.max((Date.now() - t0) / 1000, 0.2);
+      sp.textContent = Math.round(pct) + "% · " + fmt(ev.loaded / secs) + "/s";
+    };
+    xhr.onload = function () { location.reload(); };
+    xhr.onerror = function () {
+      document.getElementById("progT").textContent = "Tải lên thất bại. Kiểm tra mạng rồi thử lại.";
+      fill.style.background = "#d64545";
+    };
+    xhr.send(new FormData(f));
+  });
+  document.addEventListener("dragover", function (e) {
+    var d = document.getElementById("drop");
+    if (d) { e.preventDefault(); d.classList.add("on"); }
+  });
+  document.addEventListener("dragleave", function () {
+    var d = document.getElementById("drop");
+    if (d) d.classList.remove("on");
+  });
+  document.addEventListener("drop", function (e) {
+    var d = document.getElementById("drop");
+    if (!d) return;
+    e.preventDefault();
+    d.classList.remove("on");
+    var input = document.getElementById("file");
+    if (input && e.dataTransfer && e.dataTransfer.files.length) {
+      input.files = e.dataTransfer.files;
+      var f = document.getElementById("up");
+      if (f) f.requestSubmit ? f.requestSubmit() : f.submit();
+    }
+  });
+})();
+"""

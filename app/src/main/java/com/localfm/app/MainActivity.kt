@@ -275,6 +275,13 @@ private fun FileManagerApp(darkMode: Boolean, startFile: File? = null, onDarkMod
     var showNfc by remember { mutableStateOf(false) }
     var showShareName by remember { mutableStateOf(false) }
     var showInstaller by remember { mutableStateOf(false) }
+    var deviceCount by remember { mutableIntStateOf(0) }
+    LaunchedEffect(serverRunning) {
+        while (true) {
+            deviceCount = if (serverRunning) ServerBridge.server?.activeClients() ?: 0 else 0
+            delay(2000)
+        }
+    }
     var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
     OpLog.init(context)
     ShareName.init(context)
@@ -557,6 +564,7 @@ private fun FileManagerApp(darkMode: Boolean, startFile: File? = null, onDarkMod
             if (!landscape) ServerControlPanel(
                 running = serverRunning,
                 ip = localIp,
+                devices = deviceCount,
                 canStart = hasAllFilesAccess,
                 onCopyUrl = {
                     val url = shareUrl
@@ -1392,6 +1400,7 @@ private fun PathBar(path: String) {
 private fun ServerControlPanel(
     running: Boolean,
     ip: String?,
+    devices: Int = 0,
     canStart: Boolean,
     onToggle: (Boolean) -> Unit,
     onCopyUrl: () -> Unit,
@@ -1426,7 +1435,10 @@ private fun ServerControlPanel(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = if (running) "Đang phát trên cổng 8080" else "Máy chủ đang tắt",
+                        text = if (running) {
+                            val n = if (devices == 1) "1 thiết bị" else "$devices thiết bị"
+                            "Cổng ${FmSettings.port(ctx)} · " + (if (devices > 0) n else "chưa có thiết bị kết nối")
+                        } else "Máy chủ đang tắt",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
