@@ -246,10 +246,15 @@ fun FileGrid(
 @Composable
 internal fun FileTile(file: File, selected: Boolean, onClick: () -> Unit, onLong: () -> Unit) {
     val isVideo = file.extension.lowercase() in VIDEO_EXT
-    val mediaLike = !file.isDirectory && (isImage(file) || isVideo)
+    val isAudio = file.extension.lowercase() in AUDIO_EXT
+    val mediaLike = !file.isDirectory && (isImage(file) || isVideo || isAudio)
     val thumb by produceState<Bitmap?>(null, file.absolutePath, file.lastModified()) {
         value = if (!mediaLike) null else withContext(Dispatchers.IO) {
-            if (isVideo) ThumbCache.video(file) else ThumbCache.image(file)
+            when {
+                isVideo -> ThumbCache.video(file)
+                isAudio -> ThumbCache.audioArt(file)
+                else -> ThumbCache.image(file)
+            }
         }
     }
     val shown = thumb

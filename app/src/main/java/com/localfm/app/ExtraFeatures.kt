@@ -229,8 +229,56 @@ object BackupKit {
     }
 }
 
+/** Đuôi file nhạc hiển thị ảnh bìa và tên ca sĩ. */
+val AUDIO_EXT = setOf("mp3", "m4a", "aac", "flac", "ogg", "oga", "opus", "wav", "wma", "amr", "mid", "midi")
+
 object ThumbCache {
     private val mem = android.util.LruCache<String, Bitmap>(80)
+    private val audioMetaCache = android.util.LruCache<String, Array<String?>>(400)
+
+    /** [ca sĩ, tên bài, album]; giá trị null nếu file không có thẻ. Đọc một lần rồi lưu cache. */
+    fun audioMeta(file: File): Array<String?> {
+        val key = file.absolutePath + ":" + file.lastModified()
+        audioMetaCache.get(key)?.let { return it }
+        val r = MediaMetadataRetriever()
+        val out: Array<String?> = try {
+            r.setDataSource(file.absolutePath)
+            arrayOf(
+                r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)?.takeIf { it.isNotBlank() },
+                r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)?.takeIf { it.isNotBlank() },
+                r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() }
+            )
+        } catch (_: Exception) {
+            arrayOfNulls(3)
+        } finally {
+            r.release()
+        }
+        audioMetaCache.put(key, out)
+        return out
+    }
+
+    /** Ảnh bìa nhúng trong file nhạc (ID3, FLAC...). Không có ảnh bìa thì trả về null. */
+    fun audioArt(file: File): Bitmap? {
+        if (PowerMode.active) return null
+        val key = "a:" + file.absolutePath + ":" + file.lastModified()
+        mem.get(key)?.let { return it }
+        val r = MediaMetadataRetriever()
+        return try {
+            r.setDataSource(file.absolutePath)
+            val bytes = r.embeddedPicture ?: return null
+            val opt = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opt)
+            var sample = 1
+            while (maxOf(opt.outWidth, opt.outHeight) / sample > 192) sample *= 2
+            val real = BitmapFactory.Options().apply { inSampleSize = sample }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, real)?.also { mem.put(key, it) }
+        } catch (_: Exception) {
+            null
+        } finally {
+            r.release()
+        }
+    }
+
     fun image(file: File): Bitmap? {
         if (PowerMode.active) return null
         mem.get(file.absolutePath)?.let { return it }

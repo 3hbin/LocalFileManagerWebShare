@@ -1643,6 +1643,7 @@ private fun FileRow(
                     pkg != null -> ThumbCache.appPkg(ctx, pkg)
                     isImage(file) -> ThumbCache.image(file)
                     file.extension.lowercase() in setOf("mp4", "mkv", "webm", "3gp") -> ThumbCache.video(file)
+                    file.extension.lowercase() in AUDIO_EXT -> ThumbCache.audioArt(file)
                     apkLike -> ThumbCache.apk(ctx, file)
                     else -> null
                 }
@@ -2380,11 +2381,18 @@ private fun subtitleFor(file: File): String {
 
 private fun subtitleForInner(file: File): String {
     val time = DATE_FMT.format(Date(file.lastModified()))
-    return if (file.isDirectory) {
-        if (PowerMode.active) "Thư mục  ·  $time" else "${file.listFiles()?.size ?: 0} mục  ·  $time"
-    } else {
-        "${formatSize(file.length())}  ·  $time"
+    if (file.isDirectory) {
+        return if (PowerMode.active) "Thư mục  ·  $time" else "${file.listFiles()?.size ?: 0} mục  ·  $time"
     }
+    if (file.extension.lowercase() in AUDIO_EXT) {
+        val meta = ThumbCache.audioMeta(file)
+        val artist = meta[0]
+        val title = meta[1]
+        if (artist != null || title != null) {
+            return "${artist ?: "Chưa rõ ca sĩ"}  ·  ${title ?: file.nameWithoutExtension}  ·  ${formatSize(file.length())}"
+        }
+    }
+    return "${formatSize(file.length())}  ·  $time"
 }
 
 // -----------------------------------------------------------------------------
