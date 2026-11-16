@@ -83,7 +83,14 @@ class Shell:
 
     def run(self):
         print("Gõ help để xem lệnh. ls để xem danh sách.")
-        self.refresh()
+        try:
+            self.refresh()
+        except AuthError:
+            print("Cần đăng nhập. Chạy lại và nhập đúng mật khẩu.")
+            return
+        except LfmError as e:
+            print(f"Lỗi: {e}")
+            return
         self.ls()
         while True:
             try:

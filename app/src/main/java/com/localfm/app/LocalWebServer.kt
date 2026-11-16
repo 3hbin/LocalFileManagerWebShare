@@ -157,6 +157,7 @@ class LocalWebServer(
             uri == "/download" -> serveDownload(params["p"].orEmpty())
             uri == "/zip" -> serveZip(params["p"].orEmpty())
             uri == "/api/list" -> serveApiList(params["p"].orEmpty())
+            uri == "/api/search" -> apiSearch(params["p"].orEmpty(), params["q"].orEmpty())
             else -> newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Không tìm thấy")
         }
     }
@@ -169,6 +170,9 @@ class LocalWebServer(
         return when (uri) {
             "/upload" -> handleUpload(files, params)
             "/zip-selected" -> handleZipSelected(params)
+            "/api/rename" -> apiRename(params)
+            "/api/delete" -> apiDelete(params)
+            "/api/mkdir" -> apiMkdir(params)
             else -> newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Không tìm thấy")
         }
     }
@@ -347,6 +351,85 @@ d.addEventListener('drop',e=>{if(e.dataTransfer.files.length){f.files=e.dataTran
             }
         val body = JSONObject().put("path", relativePath(dir)).put("items", items).toString()
         return newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", body)
+    }
+
+    private fun jsonOk(obj: JSONObject): Response =
+        newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", obj.toString())
+
+    private fun jsonErr(code: Response.IStatus, msg: String): Response =
+        newFixedLengthResponse(code, "application/json; charset=utf-8", JSONObject().put("error", msg).toString())
+
+    /** Tên mới phải là một tên thư mục/tệp đơn giản: không có dấu / và không bắt đầu bằng dấu chấm. */
+    private fun validName(name: String): Boolean =
+        name.isNotBlank() && name.length <= 200 && !name.startsWith(".") &&
+            !name.contains('/') && !name.contains('\\')
+
+    private fun entryJson(f: File): JSONObject =
+        JSONObject()
+            .put("name", f.name)
+            .put("dir", f.isDirectory)
+            .put("size", if (f.isFile) f.length() else 0L)
+            .put("modified", f.lastModified())
+            .put("path", relativePath(f))
+
+    /** POST /api/rename: p=<đường dẫn>, name=<tên mới> */
+    private fun apiRename(params: Map<String, String>): Response {
+        val target = resolveSafe(params["p"].orEmpty()) ?: return jsonErr(Response.Status.NOT_FOUND, "not_found")
+        if (target == shareRoot.canonicalFile) return jsonErr(Response.Status.FORBIDDEN, "root")
+        if (!target.exists()) return jsonErr(Response.Status.NOT_FOUND, "not_found")
+        if (ReadOnlyLocks.isLocked(target)) return jsonErr(Response.Status.FORBIDDEN, "locked")
+        val newName = params["name"].orEmpty().trim()
+        if (!validName(newName)) return jsonErr(Response.Status.BAD_REQUEST, "bad_name")
+        val dest = File(target.parentFile, newName)
+        if (dest.exists()) return jsonErr(Response.Status.CONFLICT, "exists")
+        if (!target.renameTo(dest)) return jsonErr(Response.Status.INTERNAL_ERROR, "failed")
+        return jsonOk(JSONObject().put("path", relativePath(dest)))
+    }
+
+    /** POST /api/delete: p=<đường dẫn>. Chuyển vào .LocalFM_Trash (thư mục ẩn), không xoá hẳn. */
+    private fun apiDelete(params: Map<String, String>): Response {
+        val target = resolveSafe(params["p"].orEmpty()) ?: return jsonErr(Response.Status.NOT_FOUND, "not_found")
+        if (target == shareRoot.canonicalFile) return jsonErr(Response.Status.FORBIDDEN, "root")
+        if (!target.exists()) return jsonErr(Response.Status.NOT_FOUND, "not_found")
+        if (ReadOnlyLocks.isLocked(target)) return jsonErr(Response.Status.FORBIDDEN, "locked")
+        val bin = File(shareRoot, ".LocalFM_Trash").apply { mkdirs() }
+        val dest = File(bin, "${System.currentTimeMillis()}_${target.name}")
+        if (!target.renameTo(dest)) return jsonErr(Response.Status.INTERNAL_ERROR, "failed")
+        onEvent("Đã xoá từ máy khác: ${target.name}")
+        return jsonOk(JSONObject().put("trashed", dest.name))
+    }
+
+    /** POST /api/mkdir: p=<thư mục cha>, name=<tên thư mục> */
+    private fun apiMkdir(params: Map<String, String>): Response {
+        val parent = resolveSafe(params["p"].orEmpty()) ?: return jsonErr(Response.Status.NOT_FOUND, "not_found")
+        if (!parent.isDirectory) return jsonErr(Response.Status.NOT_FOUND, "not_found")
+        if (ReadOnlyLocks.isLocked(parent)) return jsonErr(Response.Status.FORBIDDEN, "locked")
+        val name = params["name"].orEmpty().trim()
+        if (!validName(name)) return jsonErr(Response.Status.BAD_REQUEST, "bad_name")
+        val dir = File(parent, name)
+        if (dir.exists()) return jsonErr(Response.Status.CONFLICT, "exists")
+        if (!dir.mkdir()) return jsonErr(Response.Status.INTERNAL_ERROR, "failed")
+        return jsonOk(JSONObject().put("path", relativePath(dir)))
+    }
+
+    /** GET /api/search?p=<thư mục>&q=<từ khoá>: tìm theo tên trong thư mục và thư mục con (tối đa 200 kết quả). */
+    private fun apiSearch(rel: String, q: String): Response {
+        val dir = resolveSafe(rel) ?: return jsonErr(Response.Status.NOT_FOUND, "not_found")
+        if (!dir.isDirectory) return jsonErr(Response.Status.BAD_REQUEST, "not_a_directory")
+        val needle = q.trim().lowercase(Locale.US)
+        if (needle.isEmpty()) return jsonErr(Response.Status.BAD_REQUEST, "empty_query")
+        val out = JSONArray()
+        fun walk(d: File, depth: Int) {
+            if (depth > 8 || out.length() >= 200) return
+            d.listFiles().orEmpty().forEach { f ->
+                if (out.length() >= 200) return@forEach
+                if (f.name.startsWith(".")) return@forEach
+                if (f.name.lowercase(Locale.US).contains(needle)) out.put(entryJson(f))
+                if (f.isDirectory) walk(f, depth + 1)
+            }
+        }
+        walk(dir, 0)
+        return jsonOk(JSONObject().put("path", relativePath(dir)).put("items", out))
     }
 
     private fun resolveSafe(rel: String): File? {

@@ -18,6 +18,7 @@ TOKEN = secrets.token_hex(8)
 
 class FakeShare(http.server.BaseHTTPRequestHandler):
     root = None  # gán khi khởi động
+    password = PASSWORD  # thuộc tính lớp để kiểm thử đổi được
 
     def log_message(self, *args):  # im lặng
         pass
@@ -42,8 +43,10 @@ class FakeShare(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length)
         if u.path == "/login":
+            if not self.password:  # máy chủ không đặt mật khẩu thì không có trang đăng nhập
+                return self._send(404, b"not found")
             form = urllib.parse.parse_qs(body.decode())
-            if form.get("password", [""])[0] == PASSWORD:
+            if form.get("password", [""])[0] == self.password:
                 return self._send(200, b"ok", extra={"Set-Cookie": f"lfm={TOKEN}; Path=/; HttpOnly"})
             return self._login_page()
         if u.path == "/upload":
@@ -73,7 +76,7 @@ class FakeShare(http.server.BaseHTTPRequestHandler):
         u = urllib.parse.urlsplit(self.path)
         q = urllib.parse.parse_qs(u.query)
         rel = q.get("p", [""])[0]
-        if not self._authed() and PASSWORD:
+        if not self._authed() and self.password:
             return self._login_page()
         full = os.path.join(self.root, rel)
         if u.path == "/api/list":
@@ -159,6 +162,17 @@ class ClientTests(unittest.TestCase):
         with open(os.path.join(self.tmp, "Download", "gui.bin"), "rb") as f:
             self.assertEqual(f.read(), payload)
 
+    def test_blank_password_skips_login(self):
+        saved = FakeShare.password
+        FakeShare.password = ""
+        try:
+            c = LfmClient(self.url)
+            c.login("")  # không có mật khẩu: không gọi /login, chỉ kiểm tra danh sách
+            _, items = c.list("")
+            self.assertIn("Download", [i.name for i in items])
+        finally:
+            FakeShare.password = saved
+
     def test_helpers(self):
         self.assertEqual(join_rel("", "a"), "a")
         self.assertEqual(join_rel("x/y", "a"), "x/y/a")
@@ -166,6 +180,20 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(parent_rel("a"), "")
         self.assertEqual(human_size(1500), "1.5 KB")
         self.assertEqual(human_size(12), "12 B")
+
+    def test_silent_server_gives_clear_error(self):
+        import socket
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(5)  # nhận kết nối nhưng không bao giờ trả lời
+        port = srv.getsockname()[1]
+        try:
+            c = LfmClient(f"http://127.0.0.1:{port}", timeout=1)
+            with self.assertRaises(LfmError) as ctx:
+                c.list("")
+            self.assertIn("không phản hồi", str(ctx.exception))
+        finally:
+            srv.close()
 
     def test_connection_error_message(self):
         c = LfmClient("http://127.0.0.1:1", timeout=2)

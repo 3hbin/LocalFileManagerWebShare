@@ -63,6 +63,10 @@ class LfmClient:
     # ------------------------------------------------------------------ API
     def login(self, password: str) -> None:
         """Đăng nhập. Ném AuthError nếu sai mật khẩu. Máy không đặt mật khẩu thì luôn qua."""
+        if not password:
+            # Máy chủ không đặt mật khẩu: không cần đăng nhập, chỉ cần kiểm tra truy cập được
+            self.list("")
+            return
         data = urllib.parse.urlencode({"password": password}).encode("utf-8")
         req = urllib.request.Request(f"{self.base}/login", data=data, method="POST")
         try:
@@ -71,9 +75,15 @@ class LfmClient:
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
                 raise AuthError("Sai mật khẩu") from e
+            if e.code == 404:
+                # Máy chủ không có trang đăng nhập: kiểm tra trực tiếp bằng API
+                self.list("")
+                return
             raise LfmError(f"Đăng nhập lỗi, mã {e.code}") from e
         except urllib.error.URLError as e:
             raise LfmError(f"Không kết nối được tới {self.base}: {e.reason}") from e
+        except OSError as e:
+            raise LfmError(_no_response_msg(self.base, e)) from e
         # Kiểm tra lại: nếu vẫn bị chặn thì mật khẩu sai
         self.list("")
 
@@ -91,6 +101,8 @@ class LfmClient:
             raise LfmError(f"Máy chủ trả lỗi {e.code}") from e
         except urllib.error.URLError as e:
             raise LfmError(f"Không kết nối được tới {self.base}: {e.reason}") from e
+        except OSError as e:
+            raise LfmError(_no_response_msg(self.base, e)) from e
         if "application/json" not in ctype:
             # Máy chủ trả trang đăng nhập thay vì JSON
             raise AuthError("Cần đăng nhập")
@@ -133,6 +145,8 @@ class LfmClient:
             if e.code in (401, 403):
                 raise AuthError("Cần đăng nhập") from e
             raise LfmError(f"Tải về lỗi, mã {e.code}") from e
+        except OSError as e:
+            raise LfmError(_no_response_msg(self.base, e)) from e
 
     def upload(self, rel_dir: str, local_file: str, progress: ProgressFn = None) -> None:
         """Tải một tệp lên thư mục rel_dir trên máy chủ. Gửi theo kiểu streaming, không nạp cả tệp vào bộ nhớ."""
@@ -187,9 +201,16 @@ class LfmClient:
             if resp.status >= 400:
                 raise LfmError(f"Tải lên lỗi, mã {resp.status}")
         except OSError as e:
-            raise LfmError(f"Không kết nối được tới {self.base}: {e}") from e
+            raise LfmError(_no_response_msg(self.base, e)) from e
         finally:
             conn.close()
+
+
+def _no_response_msg(base: str, err: Exception) -> str:
+    if isinstance(err, TimeoutError) or "timed out" in str(err).lower():
+        return (f"Máy chủ {base} không phản hồi. Kiểm tra Web Share đang bật. "
+                "Nếu đã bật, mở lại app Web Share (máy có thể đã tạm dừng app chạy nền).")
+    return f"Không kết nối được tới {base}: {err}"
 
 
 def join_rel(parent: str, name: str) -> str:
