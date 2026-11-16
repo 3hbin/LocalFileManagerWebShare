@@ -1,0 +1,207 @@
+"""
+Giao thức Web Share cho app ngoài (Windows, Linux, và các nền tảng khác dùng Python).
+Không phụ thuộc giao diện: có thể dùng từ dòng lệnh hoặc từ GUI.
+
+Hợp đồng với máy chủ Android (LocalWebServer):
+  POST /login            form: password=...   -> cookie "lfm" khi đúng mật khẩu
+  GET  /api/list?p=REL   -> {"path": "...", "items": [{name, dir, size, modified, path}]}
+  GET  /download?p=REL   -> nội dung tệp (có Content-Disposition)
+  GET  /zip?p=REL        -> thư mục dạng ZIP
+  POST /upload           multipart: dir=<thư mục đích>, file=<tệp>
+"""
+from __future__ import annotations
+
+import http.client
+import json
+import os
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from dataclasses import dataclass
+from http.cookiejar import CookieJar
+from typing import Callable, List, Optional, Tuple
+
+ProgressFn = Optional[Callable[[int, int], None]]
+
+
+class LfmError(Exception):
+    """Lỗi chung khi nói chuyện với máy chủ Web Share."""
+
+
+class AuthError(LfmError):
+    """Chưa đăng nhập hoặc mật khẩu sai."""
+
+
+@dataclass
+class Entry:
+    name: str
+    is_dir: bool
+    size: int
+    modified: int
+    path: str
+
+
+class LfmClient:
+    def __init__(self, base_url: str, timeout: float = 15.0):
+        base_url = base_url.strip()
+        if not base_url.startswith(("http://", "https://")):
+            base_url = "http://" + base_url
+        self.base = base_url.rstrip("/")
+        self.timeout = timeout
+        self.jar = CookieJar()
+        self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
+
+    # ------------------------------------------------------------------ helpers
+    def _url(self, endpoint: str, **params: str) -> str:
+        q = urllib.parse.urlencode(params)
+        return f"{self.base}{endpoint}" + (f"?{q}" if q else "")
+
+    def _cookie_header(self) -> str:
+        return "; ".join(f"{c.name}={c.value}" for c in self.jar)
+
+    # ------------------------------------------------------------------ API
+    def login(self, password: str) -> None:
+        """Đăng nhập. Ném AuthError nếu sai mật khẩu. Máy không đặt mật khẩu thì luôn qua."""
+        data = urllib.parse.urlencode({"password": password}).encode("utf-8")
+        req = urllib.request.Request(f"{self.base}/login", data=data, method="POST")
+        try:
+            with self.opener.open(req, timeout=self.timeout) as r:
+                r.read()
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise AuthError("Sai mật khẩu") from e
+            raise LfmError(f"Đăng nhập lỗi, mã {e.code}") from e
+        except urllib.error.URLError as e:
+            raise LfmError(f"Không kết nối được tới {self.base}: {e.reason}") from e
+        # Kiểm tra lại: nếu vẫn bị chặn thì mật khẩu sai
+        self.list("")
+
+    def list(self, rel: str = "") -> Tuple[str, List[Entry]]:
+        url = self._url("/api/list", p=rel)
+        try:
+            with self.opener.open(url, timeout=self.timeout) as r:
+                ctype = r.headers.get("Content-Type", "")
+                body = r.read()
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise AuthError("Cần đăng nhập") from e
+            if e.code == 404:
+                raise LfmError("Thư mục không tồn tại") from e
+            raise LfmError(f"Máy chủ trả lỗi {e.code}") from e
+        except urllib.error.URLError as e:
+            raise LfmError(f"Không kết nối được tới {self.base}: {e.reason}") from e
+        if "application/json" not in ctype:
+            # Máy chủ trả trang đăng nhập thay vì JSON
+            raise AuthError("Cần đăng nhập")
+        data = json.loads(body.decode("utf-8"))
+        entries = [
+            Entry(
+                name=i["name"],
+                is_dir=bool(i["dir"]),
+                size=int(i.get("size", 0)),
+                modified=int(i.get("modified", 0)),
+                path=i["path"],
+            )
+            for i in data.get("items", [])
+        ]
+        return data.get("path", rel), entries
+
+    def download(self, entry: Entry, dest: str, progress: ProgressFn = None) -> int:
+        """Tải một tệp (hoặc thư mục dạng ZIP) về đường dẫn dest. Trả về số byte đã ghi."""
+        endpoint = "/zip" if entry.is_dir else "/download"
+        url = self._url(endpoint, p=entry.path)
+        try:
+            with self.opener.open(url, timeout=self.timeout) as r:
+                if "Content-Disposition" not in r.headers:
+                    raise AuthError("Cần đăng nhập")
+                total = int(r.headers.get("Content-Length") or 0)
+                done = 0
+                tmp = dest + ".part"
+                with open(tmp, "wb") as out:
+                    while True:
+                        chunk = r.read(256 * 1024)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        done += len(chunk)
+                        if progress:
+                            progress(done, total)
+                os.replace(tmp, dest)
+                return done
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise AuthError("Cần đăng nhập") from e
+            raise LfmError(f"Tải về lỗi, mã {e.code}") from e
+
+    def upload(self, rel_dir: str, local_file: str, progress: ProgressFn = None) -> None:
+        """Tải một tệp lên thư mục rel_dir trên máy chủ. Gửi theo kiểu streaming, không nạp cả tệp vào bộ nhớ."""
+        if not os.path.isfile(local_file):
+            raise LfmError(f"Không có tệp: {local_file}")
+        u = urllib.parse.urlsplit(self.base)
+        boundary = "----lfm" + uuid.uuid4().hex
+        name = os.path.basename(local_file).replace('"', "_")
+        pre = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="dir"\r\n\r\n{rel_dir}\r\n'
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{name}"\r\n'
+            "Content-Type: application/octet-stream\r\n\r\n"
+        ).encode("utf-8")
+        post = f"\r\n--{boundary}--\r\n".encode("utf-8")
+        size = os.path.getsize(local_file)
+        total = len(pre) + size + len(post)
+
+        port = u.port or (443 if u.scheme == "https" else 80)
+        ConnCls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
+        conn = ConnCls(u.hostname, port, timeout=60)
+        path = (u.path.rstrip("/") + "/upload") or "/upload"
+        headers = {
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Content-Length": str(total),
+        }
+        cookie = self._cookie_header()
+        if cookie:
+            headers["Cookie"] = cookie
+        try:
+            conn.putrequest("POST", path)
+            for k, v in headers.items():
+                conn.putheader(k, v)
+            conn.endheaders()
+            conn.send(pre)
+            sent = len(pre)
+            with open(local_file, "rb") as f:
+                while True:
+                    chunk = f.read(256 * 1024)
+                    if not chunk:
+                        break
+                    conn.send(chunk)
+                    sent += len(chunk)
+                    if progress:
+                        progress(sent, total)
+            conn.send(post)
+            resp = conn.getresponse()
+            resp.read()
+            if resp.status in (401, 403):
+                raise AuthError("Cần đăng nhập")
+            if resp.status >= 400:
+                raise LfmError(f"Tải lên lỗi, mã {resp.status}")
+        except OSError as e:
+            raise LfmError(f"Không kết nối được tới {self.base}: {e}") from e
+        finally:
+            conn.close()
+
+
+def join_rel(parent: str, name: str) -> str:
+    return f"{parent}/{name}".strip("/") if parent else name
+
+
+def parent_rel(rel: str) -> str:
+    return rel.rsplit("/", 1)[0] if "/" in rel else ""
+
+
+def human_size(n: int) -> str:
+    for unit, div in (("GB", 1000 ** 3), ("MB", 1000 ** 2), ("KB", 1000)):
+        if n >= div:
+            return f"{n / div:.1f} {unit}"
+    return f"{n} B"

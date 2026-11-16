@@ -1,5 +1,7 @@
 package com.localfm.app
 
+import org.json.JSONObject
+import org.json.JSONArray
 import android.webkit.MimeTypeMap
 import fi.iki.elonen.NanoHTTPD
 import java.io.File
@@ -154,6 +156,7 @@ class LocalWebServer(
             uri == "/" || uri == "/browse" || uri.startsWith("/browse") -> serveListing(params["p"].orEmpty())
             uri == "/download" -> serveDownload(params["p"].orEmpty())
             uri == "/zip" -> serveZip(params["p"].orEmpty())
+            uri == "/api/list" -> serveApiList(params["p"].orEmpty())
             else -> newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Không tìm thấy")
         }
     }
@@ -317,6 +320,34 @@ d.addEventListener('drop',e=>{if(e.dataTransfer.files.length){f.files=e.dataTran
 
     private fun cssResponse(): Response =
         newFixedLengthResponse(Response.Status.OK, "text/css; charset=utf-8", WEB_CSS)
+
+    /**
+     * API JSON cho app ngoài (desktop, iOS, HarmonyOS). Cần đăng nhập giống các trang khác.
+     * GET /api/list?p=<đường dẫn tương đối> -> {"path": "...", "items": [{name, dir, size, modified, path}]}
+     */
+    private fun serveApiList(rel: String): Response {
+        val dir = resolveSafe(rel)
+            ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, "application/json", "{\"error\":\"not_found\"}")
+        if (!dir.isDirectory) {
+            return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json", "{\"error\":\"not_a_directory\"}")
+        }
+        val items = JSONArray()
+        dir.listFiles().orEmpty()
+            .filter { !it.name.startsWith(".") }
+            .sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase(Locale.US) })
+            .forEach { f ->
+                items.put(
+                    JSONObject()
+                        .put("name", f.name)
+                        .put("dir", f.isDirectory)
+                        .put("size", if (f.isFile) f.length() else 0L)
+                        .put("modified", f.lastModified())
+                        .put("path", relativePath(f))
+                )
+            }
+        val body = JSONObject().put("path", relativePath(dir)).put("items", items).toString()
+        return newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", body)
+    }
 
     private fun resolveSafe(rel: String): File? {
         val decoded = try {

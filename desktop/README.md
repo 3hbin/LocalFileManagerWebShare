@@ -1,0 +1,37 @@
+# Web Share · Client Windows / Linux (Python)
+
+Client nhỏ để duyệt, tải về và tải lên tới điện thoại đang bật **Web Share** trong cùng mạng Wi-Fi.
+Chỉ dùng thư viện chuẩn của Python, không cần cài thêm gì.
+
+## Yêu cầu
+- Python 3.9 trở lên (Windows và Linux). Trên Linux có thể cần cài gói `python3-tk`.
+- Điện thoại đang bật Web Share (cùng mạng Wi-Fi).
+
+## Chạy
+```
+python app_gui.py
+```
+1. Nhập địa chỉ hiển thị trong app điện thoại, ví dụ `http://192.168.1.8:8120`
+   (nếu đã đặt tên link: `http://192.168.1.8:8120/ten-link`).
+2. Nhập mật khẩu Web Share (để trống nếu không đặt).
+3. Bấm **Kết nối**, duyệt thư mục, bấm đúp để mở.
+4. **Tải về**: chọn một hoặc nhiều mục, chọn thư mục lưu. Thư mục được tải về dạng ZIP.
+5. **Tải lên**: chọn tệp, tệp được gửi vào thư mục đang mở trên điện thoại.
+
+## Kiểm thử (không cần điện thoại)
+```
+python test_lfm_core.py
+```
+Kiểm thử chạy một máy chủ giả đúng theo hợp đồng API và kiểm tra đăng nhập,
+liệt kê, tải về, tải lên (kể cả tệp lớn gửi theo từng phần).
+
+## Cấu trúc
+- `lfm_core.py`: giao thức (không có giao diện), dùng lại được cho các client khác.
+- `app_gui.py`: giao diện Tkinter.
+- `test_lfm_core.py`: kiểm thử giao thức.
+
+## Giới hạn
+- Chưa có tìm kiếm, đổi tên, xoá, di chuyển từ client này. Hiện chỉ duyệt, tải về, tải lên.
+- Chưa có tự phát hiện máy trong mạng (phải nhập địa chỉ).
+- Web Share không mã hoá (HTTP). Chỉ dùng trong mạng nội bộ tin cậy.
+- Giao diện Tkinter chưa được chạy thử trên màn hình thật trong môi trường đã kiểm tra.
