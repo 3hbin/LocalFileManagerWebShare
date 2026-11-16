@@ -24,7 +24,7 @@ Termux không có giao diện đồ họa, nên dùng bản dòng lệnh `app_cl
 pkg install python
 python app_cli.py http://192.168.1.8:8120
 ```
-Trong chế độ tương tác: `ls`, `cd <tên>`, `cd ..`, `get <số>` (tải về), `put <đường dẫn>` (tải lên), `quit`.
+Trong chế độ tương tác: `ls`, `cd <tên>`, `cd ..`, `get <số>` (tải về), `put <đường dẫn>` (tải lên), `find <từ khoá>` (tìm), `rename <số> <tên mới>`, `rm <số>` (chuyển vào thùng rác trên điện thoại, có hỏi xác nhận), `mkdir <tên>`, `quit`.
 Lệnh `get` lưu vào thư mục đang đứng trong Termux (`pwd` để xem).
 Chạy trên Termux cần quyền bộ nhớ: `termux-setup-storage` (để lưu vào Download nếu muốn).
 
@@ -42,7 +42,8 @@ liệt kê, tải về, tải lên (kể cả tệp lớn gửi theo từng ph�
 - `test_lfm_core.py`: kiểm thử giao thức.
 
 ## Giới hạn
-- Chưa có tìm kiếm, đổi tên, xoá, di chuyển từ client này. Hiện chỉ duyệt, tải về, tải lên.
+- Chưa có di chuyển/sao chép giữa các thư mục trên điện thoại.
+- Xoá không xoá hẳn: mục được chuyển vào thư mục ẩn `.LocalFM_Trash` trên điện thoại (cần cài Web Share bản 1.12.0 trở lên).
 - Chưa có tự phát hiện máy trong mạng (phải nhập địa chỉ).
 - Web Share không mã hoá (HTTP). Chỉ dùng trong mạng nội bộ tin cậy.
 - Giao diện Tkinter chưa được chạy thử trên màn hình thật trong môi trường đã kiểm tra.

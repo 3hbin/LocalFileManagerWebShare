@@ -1,0 +1,83 @@
+name: Build desktop client
+
+on:
+  push:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-build.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows (.exe)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Kiểm thử giao thức
+        run: python test_lfm_core.py
+
+      - name: Cài PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Build giao diện (WebShare.exe)
+        run: python -m PyInstaller --onefile --windowed --name WebShare app_gui.py
+
+      - name: Build dòng lệnh (WebShare-CLI.exe)
+        run: python -m PyInstaller --onefile --name WebShare-CLI app_cli.py
+
+      - name: Kiểm tra file đã tạo
+        run: |
+          if (!(Test-Path dist\WebShare.exe)) { throw "Thiếu WebShare.exe" }
+          if (!(Test-Path dist\WebShare-CLI.exe)) { throw "Thiếu WebShare-CLI.exe" }
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WebShare-Windows
+          path: desktop/dist/*.exe
+          if-no-files-found: error
+
+  linux:
+    name: Linux (binary)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Kiểm tra Tkinter
+        run: python -c "import tkinter; print('tkinter', tkinter.TkVersion)"
+
+      - name: Kiểm thử giao thức
+        run: python test_lfm_core.py
+
+      - name: Cài PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Build giao diện (WebShare-Linux)
+        run: python -m PyInstaller --onefile --name WebShare-Linux app_gui.py
+
+      - name: Build dòng lệnh (WebShare-CLI-Linux)
+        run: python -m PyInstaller --onefile --name WebShare-CLI-Linux app_cli.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WebShare-Linux
+          path: desktop/dist/*
+          if-no-files-found: error

@@ -7,7 +7,7 @@ import queue
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from lfm_core import AuthError, Entry, LfmClient, LfmError, human_size, join_rel, parent_rel
 
@@ -43,8 +43,21 @@ class App(tk.Tk):
         ttk.Button(nav, text="⟳ Làm mới", command=self.refresh).pack(side="left", padx=4)
         ttk.Button(nav, text="Tải về", command=self.download_selected).pack(side="left", padx=4)
         ttk.Button(nav, text="Tải lên", command=self.upload_files).pack(side="left", padx=4)
+        ttk.Button(nav, text="Đổi tên", command=self.rename_selected).pack(side="left", padx=4)
+        ttk.Button(nav, text="Xoá", command=self.delete_selected).pack(side="left", padx=4)
+        ttk.Button(nav, text="Thư mục mới", command=self.mkdir_here).pack(side="left", padx=4)
         self.path_var = tk.StringVar(value="(chưa kết nối)")
         ttk.Label(nav, textvariable=self.path_var).pack(side="left", padx=12)
+
+        find = ttk.Frame(self, padding=(8, 0))
+        find.pack(fill="x")
+        ttk.Label(find, text="Tìm tên:").pack(side="left")
+        self.search_var = tk.StringVar()
+        search_entry = ttk.Entry(find, textvariable=self.search_var, width=32)
+        search_entry.pack(side="left", padx=4)
+        search_entry.bind("<Return>", lambda e: self.search())
+        ttk.Button(find, text="Tìm", command=self.search).pack(side="left", padx=4)
+        ttk.Button(find, text="Xoá kết quả tìm", command=self.refresh).pack(side="left", padx=4)
 
         body = ttk.Frame(self, padding=8)
         body.pack(fill="both", expand=True)
@@ -141,18 +154,74 @@ class App(tk.Tk):
         def ok(result):
             path, entries = result
             self.rel = path
-            self.entries = entries
-            self.path_var.set("/" + path if path else "/ (gốc)")
-            self.tree.delete(*self.tree.get_children())
-            for i, e in enumerate(entries):
-                self.tree.insert("", "end", iid=str(i), values=(
-                    e.name,
-                    "Thư mục" if e.is_dir else "Tệp",
-                    "" if e.is_dir else human_size(e.size),
-                    time.strftime("%d/%m/%Y %H:%M", time.localtime(e.modified / 1000)) if e.modified else "",
-                ))
+            self._render(path_label="/" + path if path else "/ (gốc)", entries=entries)
 
         self._run(lambda: client.list(rel), on_ok=ok, busy="Đang tải danh sách…")
+
+    def _render(self, path_label, entries, show_path=False):
+        self.entries = entries
+        self.path_var.set(path_label)
+        self.tree.delete(*self.tree.get_children())
+        for i, e in enumerate(entries):
+            name = e.path if show_path else e.name  # kết quả tìm kiếm hiện đường dẫn đầy đủ
+            self.tree.insert("", "end", iid=str(i), values=(
+                name,
+                "Thư mục" if e.is_dir else "Tệp",
+                "" if e.is_dir else human_size(e.size),
+                time.strftime("%d/%m/%Y %H:%M", time.localtime(e.modified / 1000)) if e.modified else "",
+            ))
+
+    def search(self):
+        if not self.client:
+            messagebox.showinfo("Chưa kết nối", "Nhập địa chỉ và mật khẩu rồi bấm Kết nối.")
+            return
+        query = self.search_var.get().strip()
+        client, rel = self.client, self.rel
+
+        def ok(hits):
+            self._render(path_label=f"Kết quả tìm \"{query}\" ({len(hits)} mục)", entries=hits, show_path=True)
+
+        self._run(lambda: client.search(rel, query), on_ok=ok, busy="Đang tìm…")
+
+    def rename_selected(self):
+        sel = self._selected_entries()
+        if len(sel) != 1:
+            messagebox.showinfo("Chọn một mục", "Chọn đúng một mục để đổi tên.")
+            return
+        new_name = simpledialog.askstring("Đổi tên", "Tên mới:", initialvalue=sel[0].name, parent=self)
+        if not new_name:
+            return
+        client, entry = self.client, sel[0]
+        self._run(lambda: client.rename(entry.path, new_name.strip()),
+                  on_ok=lambda _p: self.refresh(), busy="Đang đổi tên…")
+
+    def delete_selected(self):
+        sel = self._selected_entries()
+        if not sel:
+            messagebox.showinfo("Chọn mục", "Chọn một hoặc nhiều mục để xoá.")
+            return
+        names = ", ".join(e.name for e in sel[:5]) + (" …" if len(sel) > 5 else "")
+        if not messagebox.askyesno("Xoá", f"Chuyển {len(sel)} mục vào thùng rác trên điện thoại?\n{names}"):
+            return
+        client = self.client
+
+        def job():
+            for e in sel:
+                client.delete(e.path)
+            return len(sel)
+
+        self._run(job, on_ok=lambda n: self.refresh(), busy="Đang xoá…")
+
+    def mkdir_here(self):
+        if not self.client:
+            messagebox.showinfo("Chưa kết nối", "Nhập địa chỉ và mật khẩu rồi bấm Kết nối.")
+            return
+        name = simpledialog.askstring("Thư mục mới", "Tên thư mục:", parent=self)
+        if not name:
+            return
+        client, rel = self.client, self.rel
+        self._run(lambda: client.mkdir(rel, name.strip()),
+                  on_ok=lambda _p: self.refresh(), busy="Đang tạo thư mục…")
 
     def refresh(self):
         self.open_path(self.rel)

@@ -38,10 +38,54 @@ class FakeShare(http.server.BaseHTTPRequestHandler):
     def _login_page(self):
         self._send(200, b"<html>login</html>", "text/html")
 
+    def _json(self, code, obj):
+        self._send(code, json.dumps(obj).encode(), "application/json; charset=utf-8")
+
+    def _form_api(self, u, body):
+        """Xử lý các API thao tác (rename, delete, mkdir) của máy chủ giả."""
+        if not self._authed() and self.password:
+            return self._login_page()
+        form = {k: v[0] for k, v in urllib.parse.parse_qs(body.decode("utf-8")).items()}
+        rel = form.get("p", "")
+        full = os.path.join(self.root, rel)
+        if u.path == "/api/rename":
+            name = form.get("name", "").strip()
+            if not os.path.exists(full):
+                return self._json(404, {"error": "not_found"})
+            if not name or "/" in name or name.startswith("."):
+                return self._json(400, {"error": "bad_name"})
+            dest = os.path.join(os.path.dirname(full), name)
+            if os.path.exists(dest):
+                return self._json(409, {"error": "exists"})
+            os.rename(full, dest)
+            return self._json(200, {"path": join_rel(parent_rel(rel), name)})
+        if u.path == "/api/delete":
+            if not os.path.exists(full):
+                return self._json(404, {"error": "not_found"})
+            bin_dir = os.path.join(self.root, ".LocalFM_Trash")
+            os.makedirs(bin_dir, exist_ok=True)
+            trashed = f"{len(os.listdir(bin_dir))}_{os.path.basename(full)}"
+            os.rename(full, os.path.join(bin_dir, trashed))
+            return self._json(200, {"trashed": trashed})
+        if u.path == "/api/mkdir":
+            name = form.get("name", "").strip()
+            if not os.path.isdir(full):
+                return self._json(404, {"error": "not_found"})
+            if not name or "/" in name or name.startswith("."):
+                return self._json(400, {"error": "bad_name"})
+            target = os.path.join(full, name)
+            if os.path.exists(target):
+                return self._json(409, {"error": "exists"})
+            os.mkdir(target)
+            return self._json(200, {"path": join_rel(rel, name)})
+        return None
+
     def do_POST(self):
         u = urllib.parse.urlsplit(self.path)
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length)
+        if u.path in ("/api/rename", "/api/delete", "/api/mkdir"):
+            return self._form_api(u, body)
         if u.path == "/login":
             if not self.password:  # máy chủ không đặt mật khẩu thì không có trang đăng nhập
                 return self._send(404, b"not found")
@@ -91,12 +135,93 @@ class FakeShare(http.server.BaseHTTPRequestHandler):
                               "path": join_rel(rel, n)})
             body = json.dumps({"path": rel, "items": items}).encode()
             return self._send(200, body, "application/json; charset=utf-8")
+        if u.path == "/api/search":
+            q = q.get("q", [""])[0].strip().lower()
+            if not q:
+                return self._json(400, {"error": "empty_query"})
+            found = []
+            for dirpath, dirnames, filenames in os.walk(full):
+                dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+                for n in dirnames + filenames:
+                    if n.startswith("."):
+                        continue
+                    if q in n.lower():
+                        p = os.path.join(dirpath, n)
+                        rel_p = os.path.relpath(p, self.root).replace(os.sep, "/")
+                        found.append({"name": n, "dir": os.path.isdir(p),
+                                      "size": os.path.getsize(p) if os.path.isfile(p) else 0,
+                                      "modified": int(os.path.getmtime(p) * 1000), "path": rel_p})
+            return self._json(200, {"path": rel, "items": found[:200]})
         if u.path == "/download" and os.path.isfile(full):
             with open(full, "rb") as f:
                 data = f.read()
             return self._send(200, data, "application/octet-stream",
                               {"Content-Disposition": f'attachment; filename="{os.path.basename(full)}"'})
         self._send(404, b"not found")
+
+
+class ActionTests(unittest.TestCase):
+    """Kiểm thử tìm kiếm, đổi tên, xoá, tạo thư mục qua máy chủ giả."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        os.makedirs(os.path.join(cls.tmp, "Docs", "sub"))
+        with open(os.path.join(cls.tmp, "Docs", "bao_cao.txt"), "wb") as f:
+            f.write(b"x")
+        with open(os.path.join(cls.tmp, "Docs", "sub", "bao_cao_2.txt"), "wb") as f:
+            f.write(b"y")
+        FakeShare.root = cls.tmp
+        FakeShare.password = ""
+        cls.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeShare)
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        cls.url = f"http://127.0.0.1:{cls.server.server_address[1]}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        FakeShare.password = PASSWORD
+
+    def test_search_finds_in_subfolders(self):
+        c = LfmClient(self.url)
+        c.login("")
+        hits = c.search("", "bao_cao")
+        names = sorted(h.name for h in hits)
+        self.assertEqual(names, ["bao_cao.txt", "bao_cao_2.txt"])
+
+    def test_search_empty_query_is_error(self):
+        c = LfmClient(self.url)
+        c.login("")
+        with self.assertRaises(LfmError):
+            c.search("", "   ")
+
+    def test_mkdir_rename_delete(self):
+        c = LfmClient(self.url)
+        c.login("")
+        created = c.mkdir("Docs", "moi")
+        self.assertEqual(created, "Docs/moi")
+        self.assertTrue(os.path.isdir(os.path.join(self.tmp, "Docs", "moi")))
+
+        renamed = c.rename("Docs/moi", "da_doi")
+        self.assertEqual(renamed, "Docs/da_doi")
+        self.assertTrue(os.path.isdir(os.path.join(self.tmp, "Docs", "da_doi")))
+
+        c.delete("Docs/da_doi")
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "Docs", "da_doi")))
+        self.assertTrue(any(n.endswith("_da_doi") for n in os.listdir(os.path.join(self.tmp, ".LocalFM_Trash"))))
+
+    def test_errors_are_clear(self):
+        c = LfmClient(self.url)
+        c.login("")
+        with self.assertRaises(LfmError) as ctx:
+            c.rename("Docs/khong_co", "x")
+        self.assertIn("Không tìm thấy", str(ctx.exception))
+        with self.assertRaises(LfmError) as ctx:
+            c.mkdir("Docs", "../bad")
+        self.assertIn("Tên không hợp lệ", str(ctx.exception))
+        with self.assertRaises(LfmError) as ctx:
+            c.rename("Docs/bao_cao.txt", "sub")  # "sub" đã là thư mục trong Docs
+        self.assertIn("Đã có mục cùng tên", str(ctx.exception))
 
 
 class ClientTests(unittest.TestCase):

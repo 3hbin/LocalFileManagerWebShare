@@ -8,6 +8,10 @@ Lệnh trong chế độ tương tác:
   cd <tên>           vào thư mục con (cd .. để lên)
   get <số>           tải mục số <số> về thư mục hiện tại của máy này
   put <đường dẫn>    tải tệp từ máy này lên thư mục đang mở trên điện thoại
+  find <từ khoá>     tìm theo tên trong thư mục hiện tại và thư mục con
+  rename <số> <tên>  đổi tên mục số <số>
+  rm <số>            chuyển mục số <số> vào thùng rác trên điện thoại (có hỏi xác nhận)
+  mkdir <tên>        tạo thư mục mới trong thư mục hiện tại
   help, quit
 """
 import getpass
@@ -81,6 +85,54 @@ class Shell:
         print(f"Đã tải lên /{self.rel}/{os.path.basename(path)}")
         self.refresh()
 
+    def find(self, query):
+        if not query:
+            print("Cách dùng: find <từ khoá>")
+            return
+        hits = self.client.search(self.rel, query)
+        self.entries = hits
+        if not hits:
+            print("Không tìm thấy mục nào.")
+            return
+        for i, e in enumerate(hits):
+            kind = "[DIR]" if e.is_dir else "     "
+            print(f"  {i:3d}  {kind} {e.path}")
+        print("Dùng get <số> để tải, hoặc cd <số> để vào thư mục.")
+
+    def rename(self, arg):
+        parts = arg.split(" ", 1)
+        if len(parts) < 2 or not parts[1].strip():
+            print("Cách dùng: rename <số> <tên mới>")
+            return
+        e = self._find(parts[0])
+        if not e:
+            print("Không có mục đó. Dùng ls để xem danh sách.")
+            return
+        new_path = self.client.rename(e.path, parts[1].strip())
+        print(f"Đã đổi thành {new_path}")
+        self.refresh()
+
+    def rm(self, arg):
+        e = self._find(arg.strip())
+        if not e:
+            print("Không có mục đó. Dùng ls để xem danh sách.")
+            return
+        ans = input(f"Chuyển '{e.name}' vào thùng rác trên điện thoại? (y/N) ").strip().lower()
+        if ans != "y":
+            print("Đã huỷ.")
+            return
+        self.client.delete(e.path)
+        print("Đã chuyển vào thùng rác (thư mục .LocalFM_Trash trên điện thoại).")
+        self.refresh()
+
+    def mkdir(self, name):
+        if not name:
+            print("Cách dùng: mkdir <tên thư mục>")
+            return
+        new_path = self.client.mkdir(self.rel, name)
+        print(f"Đã tạo {new_path}")
+        self.refresh()
+
     def run(self):
         print("Gõ help để xem lệnh. ls để xem danh sách.")
         try:
@@ -115,6 +167,14 @@ class Shell:
                     self.get(arg)
                 elif cmd == "put":
                     self.put(arg)
+                elif cmd == "find":
+                    self.find(arg)
+                elif cmd == "rename":
+                    self.rename(arg)
+                elif cmd == "rm":
+                    self.rm(arg)
+                elif cmd == "mkdir":
+                    self.mkdir(arg)
                 else:
                     print("Lệnh không hợp lệ. Gõ help.")
             except AuthError:

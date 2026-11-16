@@ -123,8 +123,10 @@ class LfmClient:
         """Tải một tệp (hoặc thư mục dạng ZIP) về đường dẫn dest. Trả về số byte đã ghi."""
         endpoint = "/zip" if entry.is_dir else "/download"
         url = self._url(endpoint, p=entry.path)
+        # Thư mục phải được nén trên điện thoại trước khi gửi, nên chờ lâu hơn
+        wait = max(self.timeout, 600.0) if entry.is_dir else self.timeout
         try:
-            with self.opener.open(url, timeout=self.timeout) as r:
+            with self.opener.open(url, timeout=wait) as r:
                 if "Content-Disposition" not in r.headers:
                     raise AuthError("Cần đăng nhập")
                 total = int(r.headers.get("Content-Length") or 0)
@@ -147,6 +149,56 @@ class LfmClient:
             raise LfmError(f"Tải về lỗi, mã {e.code}") from e
         except OSError as e:
             raise LfmError(_no_response_msg(self.base, e)) from e
+
+    # ------------------------------------------------------------ thao tác (tìm, đổi tên, xoá, tạo thư mục)
+    def _get_json(self, endpoint: str, **params: str) -> dict:
+        url = self._url(endpoint, **params)
+        try:
+            with self.opener.open(url, timeout=self.timeout) as r:
+                ctype = r.headers.get("Content-Type", "")
+                body = r.read()
+        except urllib.error.HTTPError as e:
+            raise _api_error(e) from e
+        except OSError as e:
+            raise LfmError(_no_response_msg(self.base, e)) from e
+        if "application/json" not in ctype:
+            raise AuthError("Cần đăng nhập")
+        return json.loads(body.decode("utf-8"))
+
+    def _post_json(self, endpoint: str, fields: dict) -> dict:
+        data = urllib.parse.urlencode(fields).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.base}{endpoint}", data=data, method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        try:
+            with self.opener.open(req, timeout=self.timeout) as r:
+                ctype = r.headers.get("Content-Type", "")
+                body = r.read()
+        except urllib.error.HTTPError as e:
+            raise _api_error(e) from e
+        except OSError as e:
+            raise LfmError(_no_response_msg(self.base, e)) from e
+        if "application/json" not in ctype:
+            raise AuthError("Cần đăng nhập")
+        return json.loads(body.decode("utf-8"))
+
+    def search(self, rel: str, query: str) -> List[Entry]:
+        """Tìm theo tên trong thư mục rel và các thư mục con (tối đa 200 kết quả)."""
+        data = self._get_json("/api/search", p=rel, q=query)
+        return _entries(data.get("items", []))
+
+    def rename(self, rel: str, new_name: str) -> str:
+        data = self._post_json("/api/rename", {"p": rel, "name": new_name})
+        return data.get("path", "")
+
+    def delete(self, rel: str) -> None:
+        """Xoá: máy chủ chuyển mục vào thư mục ẩn .LocalFM_Trash trên điện thoại (có thể khôi phục)."""
+        self._post_json("/api/delete", {"p": rel})
+
+    def mkdir(self, parent_rel: str, name: str) -> str:
+        data = self._post_json("/api/mkdir", {"p": parent_rel, "name": name})
+        return data.get("path", "")
 
     def upload(self, rel_dir: str, local_file: str, progress: ProgressFn = None) -> None:
         """Tải một tệp lên thư mục rel_dir trên máy chủ. Gửi theo kiểu streaming, không nạp cả tệp vào bộ nhớ."""
@@ -204,6 +256,41 @@ class LfmClient:
             raise LfmError(_no_response_msg(self.base, e)) from e
         finally:
             conn.close()
+
+
+_API_MESSAGES = {
+    "not_found": "Không tìm thấy mục này",
+    "locked": "Mục đang khoá chỉ đọc",
+    "root": "Không thao tác được với thư mục gốc",
+    "exists": "Đã có mục cùng tên",
+    "bad_name": "Tên không hợp lệ (không dùng dấu / và không bắt đầu bằng dấu chấm)",
+    "failed": "Máy chủ không thực hiện được thao tác",
+    "not_a_directory": "Đây không phải thư mục",
+    "empty_query": "Nhập từ khoá tìm kiếm",
+}
+
+
+def _api_error(e: urllib.error.HTTPError) -> Exception:
+    if e.code in (401, 403) and not _has_json_error(e):
+        return AuthError("Cần đăng nhập")
+    code = None
+    try:
+        code = json.loads(e.read().decode("utf-8")).get("error")
+    except Exception:
+        pass
+    return LfmError(_API_MESSAGES.get(code, f"Lỗi máy chủ, mã {e.code}"))
+
+
+def _has_json_error(e: urllib.error.HTTPError) -> bool:
+    return "application/json" in (e.headers.get("Content-Type", "") if e.headers else "")
+
+
+def _entries(items) -> List[Entry]:
+    return [
+        Entry(name=i["name"], is_dir=bool(i["dir"]), size=int(i.get("size", 0)),
+              modified=int(i.get("modified", 0)), path=i["path"])
+        for i in items
+    ]
 
 
 def _no_response_msg(base: str, err: Exception) -> str:
